@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 9%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+
+    /* Medical Lab Design System - Enhanced contrast and darker tones */
+    --hero-gradient: linear-gradient(135deg, hsl(259, 95%, 35%) 0%, hsl(280, 95%, 40%) 25%, hsl(320, 95%, 45%) 50%, hsl(340, 95%, 50%) 75%, hsl(15, 95%, 55%) 100%);
+    --hero-overlay: linear-gradient(135deg, hsla(259, 95%, 25%, 0.95) 0%, hsla(280, 95%, 30%, 0.9) 50%, hsla(320, 95%, 35%, 0.85) 100%);
+    --section-gradient: linear-gradient(180deg, hsl(259, 60%, 8%) 0%, hsl(280, 50%, 12%) 100%);
+    --accent-gradient: linear-gradient(135deg, hsl(280, 60%, 65%) 0%, hsl(320, 55%, 70%) 100%);
+    --trust-gradient: linear-gradient(135deg, hsl(259, 85%, 25%) 0%, hsl(280, 90%, 30%) 50%, hsl(320, 95%, 35%) 100%);
+    --logo-gradient: linear-gradient(135deg, hsl(259, 95%, 30%) 0%, hsl(276, 95%, 40%) 30%, hsl(300, 95%, 50%) 70%, hsl(320, 95%, 55%) 100%);
+    
+    /* Medical themed colors */
+    --medical-blue: 210 100% 56%;
+    --medical-teal: 173 58% 39%;
+    --medical-mint: 142 69% 58%;
+    --trust-seal: 259 84% 65%;
+    
+    /* Orange to Purple gradient */
+    --orange-purple-gradient: linear-gradient(135deg, hsl(33, 100%, 50%) 0%, hsl(45, 100%, 51%) 25%, hsl(280, 87%, 65%) 75%, hsl(259, 84%, 65%) 100%);
+    
+    /* Shadows and effects */
+    --hero-shadow: 0 20px 60px -10px hsla(259, 84%, 65%, 0.3);
+    --card-shadow: 0 4px 20px -2px hsla(259, 84%, 65%, 0.1);
+    --glow-effect: 0 0 40px hsla(259, 84%, 65%, 0.2);
+    
+    /* Typography */
+    --font-hero: 'Inter', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    
+    /* Animations */
+    --transition-smooth: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    --transition-spring: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+
+    --secondary: 0 0% 14%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 63%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Dark mode gradients - Enhanced contrast and darker tones */
+    --hero-gradient: linear-gradient(135deg, hsl(259, 95%, 20%) 0%, hsl(280, 95%, 25%) 25%, hsl(320, 95%, 30%) 50%, hsl(340, 95%, 35%) 75%, hsl(15, 95%, 40%) 100%);
+    --section-gradient: linear-gradient(180deg, hsl(259, 80%, 4%) 0%, hsl(280, 60%, 8%) 100%);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Hide Lovable badge on custom domains */
+@layer utilities {
+  #lovable-badge,
+  .lovable-badge,
+  [data-lovable-badge],
+  a[href*="lovable.app"][aria-label*="Lovable"],
+  a[href*="lovable.dev"][aria-label*="Lovable"],
+  a[href*="lovable.app"][title*="Lovable"],
+  a[href*="lovable.dev"][title*="Lovable"],
+  a[href*="lovable.app"][style*="position: fixed"],
+  a[href*="lovable.dev"][style*="position: fixed"] {
+    display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+  }
+}

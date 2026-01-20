@@ -1,0 +1,6 @@
+test_code,profile_name,test_name,body_system,report_delivered_in,customer_price,synonyms,sample_type,description
+P0001,,17-alpha Hydroxy Progesterone (17-OHP),Endocrine,48 hours,1500,17-OHP,Blood,Hormone test for adrenal function
+P0002,,1.25 Di Hydroxy Vitamin D (Vitamin D3),Endocrine,48 hours,3800,Vitamin D3,Blood,Active vitamin D measurement
+P0003,,5-Dihydrotestosterone,Endocrine,48 hours,4000,,Blood,Androgen hormone test
+P0474,Ante-natal Basic Screen,HIV I II (Ab) HbsAg VDRL CBC BloodGroup,Obstetrics,24 hours,800,,Blood,Basic antenatal screening panel
+P0475,Antenatal Profile,HIV I II (Ab) HCV(Ab) HbsAg TORCH BloodGroup,Obstetrics,24 hours,1850,,Blood,Comprehensive antenatal screening
