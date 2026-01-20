@@ -30,9 +30,9 @@ const Logo = ({ className = "h-10 sm:h-12" }: { className?: string }) => {
         <path d="M 44 45 Q 33 32, 21 21 Q 30 36, 44 45 Z" />
       </svg>
       
-      {/* PREDLABS Text */}
+      {/* 5THVITAL Text */}
       <span className="text-2xl sm:text-3xl font-bold tracking-tight">
-        PREDLABS
+        5THVITAL
       </span>
     </div>
   );

@@ -27,10 +27,10 @@ const MedicalAISection = () => {
 
   return (
     <section className="py-24 bg-white relative overflow-hidden">
-      {/* PredLabs Logo - Top Right */}
+      {/* 5thvital Logo - Top Right */}
       <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-10">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-black font-work-sans">
-          PredLabs
+          5thvital
         </h1>
       </div>
       

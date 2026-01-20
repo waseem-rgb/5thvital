@@ -92,7 +92,7 @@ const Auth = () => {
           if (signInError) throw signInError;
         }
 
-        toast.success('Login successful! Welcome to PredLabs.');
+        toast.success('Login successful! Welcome to 5thvital.');
       } else {
         throw new Error(data.error || 'Invalid OTP');
       }
@@ -115,7 +115,7 @@ const Auth = () => {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">
-            Welcome to PredLabs
+            Welcome to 5thvital
           </h1>
           <p className="text-muted-foreground">
             {step === 'phone' ? 'Enter your mobile number to continue' : 'Enter the verification code sent to your phone'}

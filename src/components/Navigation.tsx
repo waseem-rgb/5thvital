@@ -20,7 +20,7 @@ const Navigation = ({ className }: NavigationProps) => {
             <Link to="/">
               <img 
                 src="/logo/predlabs-logo.png" 
-                alt="PredLabs Logo" 
+                alt="5thvital Logo" 
                 className="h-10 sm:h-12 w-auto"
               />
             </Link>

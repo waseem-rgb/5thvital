@@ -14,7 +14,7 @@ const CallToActionSection = () => {
         <div className="sticky top-0 h-screen w-full">
           <img
             src={ctaSunsetBg}
-            alt="PredLabs book now background"
+            alt="5thvital book now background"
             className="h-full w-full object-cover will-change-transform transform-gpu"
             loading="lazy"
             decoding="async"
