@@ -123,7 +123,7 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
 
         toast({
           title: 'Login Successful',
-          description: 'Welcome to PredLabs!',
+          description: 'Welcome to 5thvital!',
         });
         onOpenChange(false);
         setStep('phone');

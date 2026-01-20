@@ -60,7 +60,7 @@ const AboutSection = () => {
               <div className="w-2 h-2 bg-medical-blue rounded-full" />
             </div>
             <span className="text-primary font-semibold uppercase tracking-wide text-sm">
-              About PredLabs
+              About 5thvital
             </span>
           </div>
           <h2 className="text-4xl md:text-5xl font-bold text-foreground mb-6">
@@ -107,7 +107,7 @@ const AboutSection = () => {
               </p>
               <p className="leading-relaxed">
                 With a platform that combines cutting-edge technology with expert medical oversight, 
-                PredLabs is setting new standards in diagnostic medicine. We're putting advanced healthcare 
+                5thvital is setting new standards in diagnostic medicine. We're putting advanced healthcare
                 insights into the hands of patients and healthcare providers alike.
               </p>
             </div>

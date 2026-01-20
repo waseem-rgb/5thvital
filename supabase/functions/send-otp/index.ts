@@ -90,7 +90,7 @@ serve(async (req) => {
       body: new URLSearchParams({
         From: fromNumber,
         To: phone,
-        Body: `Your Shendetlab verification code is: ${otp}. Valid for 5 minutes.`
+        Body: `Your 5thvital verification code is: ${otp}. Valid for 5 minutes.`
       }),
     });
 
