@@ -183,6 +183,10 @@ export type Database = {
           description: string | null
           id: string
           is_active: boolean | null
+          profile_name: string | null
+          report_delivered_in: string | null
+          sample_type: string | null
+          synonyms: string[] | null
           test_code: string
           test_name: string
           updated_at: string
@@ -194,6 +198,10 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean | null
+          profile_name?: string | null
+          report_delivered_in?: string | null
+          sample_type?: string | null
+          synonyms?: string[] | null
           test_code: string
           test_name: string
           updated_at?: string
@@ -205,6 +213,10 @@ export type Database = {
           description?: string | null
           id?: string
           is_active?: boolean | null
+          profile_name?: string | null
+          report_delivered_in?: string | null
+          sample_type?: string | null
+          synonyms?: string[] | null
           test_code?: string
           test_name?: string
           updated_at?: string
