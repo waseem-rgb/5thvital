@@ -765,7 +765,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                 </div>
 
                 <div>
-                  <Label className="text-sm font-medium text-gray-700 mb-2 block">Preferred Date</Label>
+                  <Label className="text-sm font-medium text-gray-700 mb-2 block">Preferred Date *</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
@@ -792,7 +792,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                 </div>
 
                 <div>
-                  <Label className="text-sm font-medium text-gray-700 mb-2 block">Preferred Time</Label>
+                  <Label className="text-sm font-medium text-gray-700 mb-2 block">Preferred Time *</Label>
                   <Select onValueChange={(value) => handleInputChange('preferredTime', value)}>
                     <SelectTrigger className="bg-white border-gray-300 text-gray-900">
                       <SelectValue placeholder="Select time" />
@@ -914,7 +914,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
 
             <Button 
               type="submit"
-              disabled={isSubmitting || !bookingData.customerName || !bookingData.customerPhone || cartItems.length === 0 || !user}
+              disabled={isSubmitting || !bookingData.customerName || !bookingData.customerPhone || !bookingData.preferredDate || !bookingData.preferredTime || !bookingData.address || cartItems.length === 0}
               className="w-full bg-black hover:bg-gray-800 text-white text-base sm:text-lg py-6 font-semibold rounded-lg"
               size="lg"
             >
