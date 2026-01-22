@@ -77,7 +77,7 @@ const BookingHero = () => {
           </h1>
           
           <p className="text-base sm:text-lg md:text-xl text-white/95 max-w-5xl text-left leading-relaxed">
-            Our laboratory follows strict NABL-standard protocols and uses advanced analyzers, automated workflows, and quality-control systems to ensure every test result is accurate, timely, and dependable.
+            Our partnered laboratories follow strict NABL-standard protocols and use advanced analyzers, automated workflows, and quality-control systems to ensure every test result is accurate, timely, and dependable.
           </p>
         </div>
       </div>
