@@ -15,6 +15,81 @@ interface SMSRequest {
   scheduledDate?: string;
 }
 
+function formatPhoneE164India(input: string): string {
+  const trimmed = (input || '').trim();
+  const digitsOnly = trimmed.replace(/\D/g, '');
+
+  // Enhanced E.164 formatting for Indian numbers
+  if (digitsOnly.length === 10) {
+    return `+91${digitsOnly}`;
+  }
+  if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+    return `+91${digitsOnly.slice(1)}`;
+  }
+  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+    return `+${digitsOnly}`;
+  }
+
+  if (trimmed.startsWith('+')) {
+    return trimmed;
+  }
+
+  // Default to Indian format with last 10 digits (best-effort)
+  return `+91${digitsOnly.slice(-10)}`;
+}
+
+async function sendTwilioSms(params: {
+  accountSid: string;
+  authToken: string;
+  from: string;
+  to: string;
+  body: string;
+  label: string;
+}) {
+  const { accountSid, authToken, from, to, body, label } = params;
+
+  let attempts = 0;
+  let response: Response | undefined;
+  let result: any;
+
+  while (attempts < 3) {
+    try {
+      response = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${btoa(`${accountSid}:${authToken}`)}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            From: from,
+            To: to,
+            Body: body,
+          }),
+        }
+      );
+
+      result = await response.json();
+
+      if (response.ok) {
+        console.log(`${label} SMS sent successfully on attempt`, attempts + 1, ':', result.sid);
+        return { ok: true as const, sid: result.sid, response, result };
+      }
+
+      console.error(`${label} SMS attempt ${attempts + 1} failed:`, result);
+      attempts++;
+      if (attempts < 3) await new Promise((resolve) => setTimeout(resolve, 2000));
+    } catch (error) {
+      console.error(`${label} SMS attempt ${attempts + 1} error:`, error);
+      attempts++;
+      if (attempts < 3) await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  return { ok: false as const, sid: undefined, response, result };
+}
+
 const handler = async (req: Request): Promise<Response> => {
   console.log('SMS function called');
 
@@ -44,33 +119,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     console.log('SMS request data:', { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate });
 
-    // Format phone number to E.164 format (ensure it starts with +)
-    let formattedPhone = customerPhone.trim().replace(/\D/g, ''); // Remove all non-digits
-    
-    // Enhanced E.164 formatting for Indian numbers
-    if (formattedPhone.length === 10) {
-      // Standard 10-digit Indian number
-      formattedPhone = '+91' + formattedPhone;
-    } else if (formattedPhone.length === 11 && formattedPhone.startsWith('0')) {
-      // Indian number with leading 0 (remove it)
-      formattedPhone = '+91' + formattedPhone.slice(1);
-    } else if (formattedPhone.length === 12 && formattedPhone.startsWith('91')) {
-      // Indian number with country code but no +
-      formattedPhone = '+' + formattedPhone;
-    } else if (formattedPhone.length === 13 && formattedPhone.startsWith('91')) {
-      // Indian number with country code and extra digit
-      formattedPhone = '+91' + formattedPhone.slice(2);
-    } else if (formattedPhone.length > 10 && !customerPhone.startsWith('+')) {
-      // Extract last 10 digits for Indian format
-      formattedPhone = '+91' + formattedPhone.slice(-10);
-    } else if (customerPhone.startsWith('+')) {
-      // Already in international format
-      formattedPhone = customerPhone.trim();
-    } else {
-      // Default to Indian format with last 10 digits
-      formattedPhone = '+91' + formattedPhone.slice(-10);
-    }
-    
+    const formattedPhone = formatPhoneE164India(customerPhone);
     console.log('Phone number formatting:', {
       original: customerPhone,
       digitsOnly: customerPhone.trim().replace(/\D/g, ''),
@@ -90,8 +139,9 @@ const handler = async (req: Request): Promise<Response> => {
     console.log('Sending SMS to customer:', formattedPhone);
     console.log('Customer message:', messageBody);
 
-    // Manager notification number
-    const managerPhone = '+917993448425';
+    // Manager/admin notification number (configurable via backend secret)
+    const managerPhoneRaw = Deno.env.get('ADMIN_PHONE_NUMBER') || '+917993448425';
+    const managerPhone = formatPhoneE164India(managerPhoneRaw);
     
     // Manager message body
     const managerMessageBody = `New booking received! Customer: ${customerName} (${formattedPhone}). Total: ₹${totalAmount.toLocaleString()}. ${scheduledDate && scheduledTime ? `Scheduled: ${scheduledDate} at ${scheduledTime}` : 'Schedule pending'}. Booking ID: ${bookingId}`;
@@ -99,160 +149,67 @@ const handler = async (req: Request): Promise<Response> => {
     console.log('Sending SMS to manager:', managerPhone);
     console.log('Manager message:', managerMessageBody);
 
-    // Send SMS to customer with retry mechanism
-    let customerAttempts = 0;
-    let customerResponse;
-    let customerResult;
-    
-    while (customerAttempts < 3) {
-      try {
-        customerResponse = await fetch(
-          `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Basic ${btoa(`${twilioAccountSid}:${twilioAuthToken}`)}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-              From: twilioFromNumber,
-              To: formattedPhone,
-              Body: messageBody,
-            }),
-          }
-        );
+    // Send SMS to customer (critical)
+    const customerSend = await sendTwilioSms({
+      accountSid: twilioAccountSid,
+      authToken: twilioAuthToken,
+      from: twilioFromNumber,
+      to: formattedPhone,
+      body: messageBody,
+      label: 'Customer',
+    });
 
-        customerResult = await customerResponse.json();
-        
-        if (customerResponse.ok) {
-          console.log('Customer SMS sent successfully on attempt', customerAttempts + 1, ':', customerResult.sid);
-          break;
-        } else {
-          console.error(`Customer SMS attempt ${customerAttempts + 1} failed:`, customerResult);
-          customerAttempts++;
-          if (customerAttempts < 3) {
-            // Wait 2 seconds before retry
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        }
-      } catch (error) {
-        console.error(`Customer SMS attempt ${customerAttempts + 1} error:`, error);
-        customerAttempts++;
-        if (customerAttempts < 3) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
-    }
+    // Send SMS to manager/admin (non-critical)
+    const managerSend = await sendTwilioSms({
+      accountSid: twilioAccountSid,
+      authToken: twilioAuthToken,
+      from: twilioFromNumber,
+      to: managerPhone,
+      body: managerMessageBody,
+      label: 'Manager',
+    });
 
-    // Send SMS to manager with retry mechanism
-    let managerAttempts = 0;
-    let managerResponse;
-    let managerResult;
-    
-    while (managerAttempts < 3) {
-      try {
-        managerResponse = await fetch(
-          `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Basic ${btoa(`${twilioAccountSid}:${twilioAuthToken}`)}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-              From: twilioFromNumber,
-              To: managerPhone,
-              Body: managerMessageBody,
-            }),
-          }
-        );
-
-        managerResult = await managerResponse.json();
-        
-        if (managerResponse.ok) {
-          console.log('Manager SMS sent successfully on attempt', managerAttempts + 1, ':', managerResult.sid);
-          break;
-        } else {
-          console.error(`Manager SMS attempt ${managerAttempts + 1} failed:`, managerResult);
-          managerAttempts++;
-          if (managerAttempts < 3) {
-            // Wait 2 seconds before retry
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        }
-      } catch (error) {
-        console.error(`Manager SMS attempt ${managerAttempts + 1} error:`, error);
-        managerAttempts++;
-        if (managerAttempts < 3) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
-    }
-
-    // Check if either SMS failed
-    const customerFailed = !customerResponse || !customerResponse.ok;
-    const managerFailed = !managerResponse || !managerResponse.ok;
-
-    if (customerFailed || managerFailed) {
-      let errorMessages = [];
-      
-      if (customerFailed) {
-        console.error('Customer SMS failed. Final result:', customerResult);
-        errorMessages.push(`Customer SMS failed: ${customerResult?.message || customerResult?.detail || 'No response received'}`);
-      }
-      
-      if (managerFailed) {
-        console.error('Manager SMS failed. Final result:', managerResult);
-        errorMessages.push(`Manager SMS failed: ${managerResult?.message || managerResult?.detail || 'No response received'}`);
-      }
-      
-      // Extract meaningful error information
+    if (!customerSend.ok) {
       const errorInfo = {
-        error: errorMessages.join('; '),
-        customerErrorCode: customerResult?.code || customerResult?.error_code || 'UNKNOWN',
-        managerErrorCode: managerResult?.code || managerResult?.error_code || 'UNKNOWN',
-        customerMessage: customerResult?.message || customerResult?.detail || 'No response received',
-        managerMessage: managerResult?.message || managerResult?.detail || 'No response received',
-        formattedPhone: formattedPhone,
-        managerPhone: managerPhone,
-        twilioFromNumber: twilioFromNumber,
-        customerDetails: customerResult,
-        managerDetails: managerResult
+        error: `Customer SMS failed: ${customerSend.result?.message || customerSend.result?.detail || 'No response received'}`,
+        customerErrorCode: customerSend.result?.code || customerSend.result?.error_code || 'UNKNOWN',
+        customerMessage: customerSend.result?.message || customerSend.result?.detail || 'No response received',
+        formattedPhone,
+        managerPhone,
+        twilioFromNumber,
+        customerDetails: customerSend.result,
       };
-      
-      console.error('SMS Error Details:', errorInfo);
-      
-      return new Response(
-        JSON.stringify(errorInfo),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
+
+      console.error('SMS Error Details (customer):', errorInfo);
+
+      return new Response(JSON.stringify(errorInfo), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    console.log('Both SMS messages sent successfully');
-    console.log('Customer SMS Response:', {
-      sid: customerResult.sid,
-      status: customerResult.status,
-      to: customerResult.to,
-      from: customerResult.from
-    });
-    console.log('Manager SMS Response:', {
-      sid: managerResult.sid,
-      status: managerResult.status,
-      to: managerResult.to,
-      from: managerResult.from
-    });
+    if (!managerSend.ok) {
+      console.warn('Manager/admin SMS failed (non-critical).', {
+        managerPhone,
+        managerDetails: managerSend.result,
+      });
+    }
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        customerMessageSid: customerResult.sid,
-        managerMessageSid: managerResult.sid,
-        formattedPhone: formattedPhone,
-        managerPhone: managerPhone,
-        twilioFromNumber: twilioFromNumber
+      JSON.stringify({
+        success: true,
+        customerMessageSid: customerSend.sid,
+        managerMessageSid: managerSend.sid,
+        managerSmsSent: managerSend.ok,
+        managerError: managerSend.ok
+          ? null
+          : {
+              code: managerSend.result?.code || managerSend.result?.error_code || 'UNKNOWN',
+              message: managerSend.result?.message || managerSend.result?.detail || 'No response received',
+            },
+        formattedPhone,
+        managerPhone,
+        twilioFromNumber,
       }),
       {
         status: 200,
