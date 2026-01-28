@@ -1,134 +1,173 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+// supabase/functions/send-otp/index.ts
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+const corsHeaders: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-);
+function getEnv(name: string): string {
+  const v = Deno.env.get(name);
+  return v ? v.trim() : "";
+}
 
-serve(async (req) => {
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+function normalizePhone(phoneRaw: string): string {
+  // Normalize phone number:
+  // - trim whitespace
+  // - remove ALL spaces and hyphens
+  // - ensure starts with "+"
+  // - DO NOT add country code implicitly
+  let p = (phoneRaw || "").trim();
+  if (!p) return "";
+  
+  // Remove all spaces and hyphens
+  p = p.replace(/[\s\-]/g, "");
+  
+  // Ensure it starts with "+"
+  if (!p.startsWith("+")) {
+    p = `+${p}`;
   }
+  
+  return p;
+}
 
+function generateOtp(): string {
+  // 6-digit OTP, leading zeros allowed
+  const n = Math.floor(Math.random() * 1000000);
+  return n.toString().padStart(6, "0");
+}
+
+Deno.serve(async (req) => {
   try {
-    const { phone } = await req.json();
-    
-    if (!phone) {
-      return new Response(
-        JSON.stringify({ error: 'Phone number is required' }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
+    if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+    if (req.method !== "POST") {
+      return json(405, { ok: false, error: "Method not allowed" });
     }
 
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Store OTP in database with 5-minute expiry
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-    
-    const { error: dbError } = await supabase
-      .from('otp_verifications')
-      .insert({
-        phone: phone,
-        otp: otp,
-        expires_at: expiresAt
+    const body = await req.json().catch(() => ({}));
+    const phone = normalizePhone(body?.phone ?? "");
+
+    if (!phone || !phone.startsWith("+")) {
+      return json(400, { ok: false, error: "Invalid phone. Use E.164 e.g. +919876543210" });
+    }
+
+    // --- Required Supabase env ---
+    const SUPABASE_URL = getEnv("SUPABASE_URL");
+    const SUPABASE_SERVICE_ROLE_KEY = getEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      console.error("Missing Supabase env:", {
+        hasUrl: !!SUPABASE_URL,
+        hasServiceRole: !!SUPABASE_SERVICE_ROLE_KEY,
+      });
+      return json(500, { ok: false, error: "Server misconfigured (Supabase env missing)" });
+    }
+
+    // --- Twilio env (either Messaging Service SID OR From Number) ---
+    const TWILIO_ACCOUNT_SID = getEnv("TWILIO_ACCOUNT_SID");
+    const TWILIO_AUTH_TOKEN = getEnv("TWILIO_AUTH_TOKEN");
+    const TWILIO_FROM_NUMBER = getEnv("TWILIO_FROM_NUMBER");
+    const TWILIO_MESSAGING_SERVICE_SID = getEnv("TWILIO_MESSAGING_SERVICE_SID");
+
+    const hasTwilio =
+      !!TWILIO_ACCOUNT_SID &&
+      !!TWILIO_AUTH_TOKEN &&
+      (!!TWILIO_MESSAGING_SERVICE_SID || !!TWILIO_FROM_NUMBER);
+
+    if (!hasTwilio) {
+      console.error(
+        "Missing Twilio credentials:",
+        JSON.stringify({
+          hasAccountSid: !!TWILIO_ACCOUNT_SID,
+          hasAuthToken: !!TWILIO_AUTH_TOKEN,
+          hasFromNumber: !!TWILIO_FROM_NUMBER,
+          hasMessagingServiceSid: !!TWILIO_MESSAGING_SERVICE_SID,
+        }),
+      );
+      return json(500, { ok: false, error: "Server misconfigured (Twilio env missing)" });
+    }
+
+    // Generate OTP + expiry
+    const otp = generateOtp();
+    const ttlMinutes = 10;
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
+
+    // Write OTP to DB using SERVICE ROLE (bypasses RLS)
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    });
+
+    // Best-effort cleanup + insert; DO NOT throw if DB fails
+    let dbOk = true;
+    try {
+      // delete old unverified OTPs for this phone (optional)
+      await admin
+        .from("otp_verifications")
+        .delete()
+        .eq("phone", phone)
+        .eq("verified", false);
+
+      const ins = await admin.from("otp_verifications").insert({
+        phone,
+        otp,
+        verified: false,
+        expires_at: expiresAt,
       });
 
-    if (dbError) {
-      console.error('Database error:', dbError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to store OTP' }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
-    }
-
-    // Get Twilio credentials from environment
-    const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-    const authToken = Deno.env.get('TWILIO_AUTH_TOKEN');
-    const fromNumber = Deno.env.get('TWILIO_FROM_NUMBER');
-    
-    console.log('Twilio Config Check:', { 
-      hasAccountSid: !!accountSid, 
-      hasAuthToken: !!authToken, 
-      hasFromNumber: !!fromNumber 
-    });
-    
-    if (!accountSid || !authToken || !fromNumber) {
-      console.error('Missing Twilio credentials:', { accountSid: !!accountSid, authToken: !!authToken, fromNumber: !!fromNumber });
-      return new Response(
-        JSON.stringify({ error: 'SMS service not configured properly' }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
+      if (ins.error) {
+        dbOk = false;
+        console.error("DB insert otp_verifications failed:", ins.error);
+      }
+    } catch (e) {
+      dbOk = false;
+      console.error("DB write exception:", e);
     }
 
     // Send SMS via Twilio
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
-    const credentials = btoa(`${accountSid}:${authToken}`);
-    
-    const twilioResponse = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${credentials}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        From: fromNumber,
-        To: phone,
-        Body: `Your 5thvital verification code is: ${otp}. Valid for 5 minutes.`
-      }),
-    });
+    try {
+      const twilioMod = await import("npm:twilio@5.5.1");
+      const twilio = twilioMod.default(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
-    if (!twilioResponse.ok) {
-      const error = await twilioResponse.text();
-      console.error('Twilio error:', error);
-      return new Response(
-        JSON.stringify({ error: 'Failed to send OTP' }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
+      const msgBody = `Your 5thvital OTP is ${otp}. Valid for ${ttlMinutes} minutes.`;
+
+      const payload: Record<string, string> = {
+        to: phone,
+        body: msgBody,
+      };
+
+      if (TWILIO_MESSAGING_SERVICE_SID) {
+        payload.messagingServiceSid = TWILIO_MESSAGING_SERVICE_SID;
+      } else {
+        payload.from = TWILIO_FROM_NUMBER;
+      }
+
+      await twilio.messages.create(payload);
+
+      console.log(`OTP sent to ${phone}: ${otp}`);
+
+      // IMPORTANT: Always return 200 OK if SMS sent
+      return json(200, {
+        ok: true,
+        phone,
+        expires_in_seconds: ttlMinutes * 60,
+        db_saved: dbOk,
+      });
+    } catch (e) {
+      console.error("Twilio send failed:", e);
+      return json(500, { ok: false, error: "Failed to send OTP" });
     }
-
-    console.log(`OTP sent to ${phone}: ${otp}`);
-    
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        message: 'OTP sent successfully',
-        // Remove this in production - only for testing
-        otp: otp 
-      }),
-      { 
-        status: 200, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
-    );
-
-  } catch (error) {
-    console.error('Error in send-otp function:', error);
-    return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
-    );
+  } catch (e) {
+    console.error("Unhandled send-otp error:", e);
+    return json(500, { ok: false, error: "Internal error" });
   }
-})
+});

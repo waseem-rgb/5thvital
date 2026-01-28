@@ -62,24 +62,53 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
         body: { phone }
       });
 
-      if (error) throw error;
+      console.log('[MobileAuth] send-otp response:', { data, error });
 
-      if (data.success) {
+      // supabase.functions.invoke may wrap non-2xx as FunctionsHttpError
+      // but the body may still contain { ok: true } if SMS was sent
+      if (error) {
+        // Try to extract response body from error context
+        const errorContext = (error as any)?.context;
+        let responseBody: any = null;
+        
+        if (errorContext?.json) {
+          try {
+            responseBody = await errorContext.json();
+          } catch {}
+        }
+        
+        console.log('[MobileAuth] Error context body:', responseBody);
+        
+        // If body indicates success, treat as success despite error wrapper
+        if (responseBody?.ok === true) {
+          toast({
+            title: 'OTP Sent',
+            description: 'Please check your phone for the verification code',
+          });
+          setStep('otp');
+          return;
+        }
+        
+        throw new Error(responseBody?.error || error.message || 'Failed to send OTP');
+      }
+
+      // Check for ok (backend uses "ok", not "success")
+      if (data?.ok === true) {
         toast({
           title: 'OTP Sent',
           description: 'Please check your phone for the verification code',
         });
         setStep('otp');
       } else {
-        throw new Error(data.error || 'Failed to send OTP');
+        throw new Error(data?.error || 'Failed to send OTP');
       }
     } catch (error: any) {
-      console.error('Send OTP error:', error);
-      let errorMessage = 'Failed to send OTP';
+      console.error('[MobileAuth] Send OTP error:', error);
+      let errorMessage = error.message || 'Failed to send OTP';
       
-      if (error.message?.includes('SMS service not configured')) {
+      if (errorMessage.includes('SMS service not configured') || errorMessage.includes('Server misconfigured')) {
         errorMessage = 'SMS service is being configured. Please try again in a moment.';
-      } else if (error.message?.includes('Invalid phone number')) {
+      } else if (errorMessage.includes('Invalid phone')) {
         errorMessage = 'Please enter a valid phone number';
       }
       
@@ -109,9 +138,47 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
         body: { phone, otp }
       });
 
-      if (error) throw error;
+      console.log('[MobileAuth] verify-otp response:', { data, error });
 
-      if (data.success) {
+      // Handle error case similar to send-otp
+      if (error) {
+        const errorContext = (error as any)?.context;
+        let responseBody: any = null;
+        
+        if (errorContext?.json) {
+          try {
+            responseBody = await errorContext.json();
+          } catch {}
+        }
+        
+        console.log('[MobileAuth] Verify error context body:', responseBody);
+        
+        // If body indicates success, treat as success
+        if (responseBody?.ok === true) {
+          // If edge function returned credentials, sign in on the client
+          if (responseBody.signIn?.email && responseBody.signIn?.password) {
+            const { error: signInError } = await supabase.auth.signInWithPassword({
+              email: responseBody.signIn.email,
+              password: responseBody.signIn.password,
+            });
+            if (signInError) throw signInError;
+          }
+          toast({
+            title: 'Login Successful',
+            description: 'Welcome to 5thvital!',
+          });
+          onOpenChange(false);
+          setStep('phone');
+          setPhone('+91 ');
+          setOtp('');
+          return;
+        }
+        
+        throw new Error(responseBody?.error || error.message || 'Invalid OTP');
+      }
+
+      // Check for ok (backend uses "ok", not "success")
+      if (data?.ok === true) {
         // If edge function returned credentials, sign in on the client
         if (data.signIn?.email && data.signIn?.password) {
           const { error: signInError } = await supabase.auth.signInWithPassword({
@@ -130,10 +197,10 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
         setPhone('+91 ');
         setOtp('');
       } else {
-        throw new Error(data.error || 'Invalid OTP');
+        throw new Error(data?.error || 'Invalid OTP');
       }
     } catch (error: any) {
-      console.error('Verify OTP error:', error);
+      console.error('[MobileAuth] Verify OTP error:', error);
       toast({
         title: 'Verification Failed',
         description: error.message || 'Invalid or expired OTP',
