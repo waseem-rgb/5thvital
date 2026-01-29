@@ -231,6 +231,10 @@ export type Database = {
           description: string | null
           body_system: string | null
           customer_price: number
+          sample_type: string | null
+          report_delivered_in: string | null
+          synonyms: string | null
+          profile_name: string | null
           created_at: string
         }
         Insert: {
@@ -240,6 +244,10 @@ export type Database = {
           description?: string | null
           body_system?: string | null
           customer_price: number
+          sample_type?: string | null
+          report_delivered_in?: string | null
+          synonyms?: string | null
+          profile_name?: string | null
           created_at?: string
         }
         Update: {
@@ -249,6 +257,10 @@ export type Database = {
           description?: string | null
           body_system?: string | null
           customer_price?: number
+          sample_type?: string | null
+          report_delivered_in?: string | null
+          synonyms?: string | null
+          profile_name?: string | null
           created_at?: string
         }
         Relationships: []

@@ -7,11 +7,10 @@ import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
- * Medical test data from the `medical_tests` table.
- * NOTE: This component queries `medical_tests` which has public read access
- * for active tests via RLS policy: "Medical tests are viewable by everyone" WHERE is_active=true
+ * Medical test data from the `medical_tests_import` table.
+ * This table contains the imported test catalog data with public read access.
  */
-interface MedicalTest {
+interface MedicalTestImport {
   id: string;
   test_name: string;
   test_code: string | null;
@@ -20,10 +19,11 @@ interface MedicalTest {
   customer_price: number;
   sample_type: string | null;
   report_delivered_in: string | null;
-  is_active: boolean | null;
+  synonyms: string | null;
+  profile_name: string | null;
 }
 
-type TestSuggestion = Pick<MedicalTest, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price' | 'sample_type' | 'report_delivered_in'>;
+type TestSuggestion = Pick<MedicalTestImport, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price' | 'sample_type' | 'report_delivered_in' | 'profile_name'>;
 
 interface SearchTestsSectionProps {
   onAddToCart: (test: TestSuggestion) => void;
@@ -32,8 +32,34 @@ interface SearchTestsSectionProps {
 type SearchState = 'idle' | 'loading' | 'results' | 'empty' | 'error';
 
 const MIN_SEARCH_LENGTH = 2;
-const DEBOUNCE_MS = 300;
+const DEBOUNCE_MS = 300; // 300ms debounce (within 250-350ms range)
 const MAX_RESULTS = 20;
+
+/**
+ * DEV-ONLY: Sanity check function to test Supabase connection and query
+ * Call this from browser console: window.__testMedicalTestsSearch?.('lipid')
+ */
+const setupDevSanityCheck = () => {
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown>).__testMedicalTestsSearch = async (term: string = 'lipid') => {
+      console.log(`[DEV] Running sanity check for "${term}" on medical_tests_import...`);
+      const { data, error } = await supabase
+        .from('medical_tests_import')
+        .select('test_name,test_code,customer_price')
+        .ilike('test_name', `%${term}%`)
+        .limit(5);
+      
+      if (error) {
+        console.error('[DEV] Sanity check error:', error);
+        return { error };
+      }
+      
+      console.log('[DEV] Sanity check results:', data);
+      return { data };
+    };
+    console.log('[DEV] Medical tests search sanity check available. Run: window.__testMedicalTestsSearch("lipid")');
+  }
+};
 
 const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,10 +70,19 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const previousTestsRef = useRef<TestSuggestion[]>([]); // Use ref instead of state to avoid re-renders
+  const requestIdRef = useRef<number>(0); // Track request ID to handle race conditions
   const { toast } = useToast();
+
+  // Setup dev sanity check on mount
+  useEffect(() => {
+    setupDevSanityCheck();
+  }, []);
 
   // Debounced search function - no state dependencies to avoid infinite loops
   const performSearch = useCallback(async (term: string, currentTests: TestSuggestion[]) => {
+    // Increment request ID to track this specific request
+    const currentRequestId = ++requestIdRef.current;
+
     // Cancel any in-flight request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -58,7 +93,9 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     if (!isSupabaseConfigured) {
       setSearchState('error');
       setErrorMessage('Search service is not configured. Please try again later.');
-      console.error('[SearchTestsSection] Supabase not configured - missing env vars');
+      if (import.meta.env.DEV) {
+        console.error('[SearchTestsSection] Supabase not configured - missing env vars');
+      }
       return;
     }
 
@@ -71,16 +108,22 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     setErrorMessage(null);
 
     try {
-      // Query the correct table: medical_tests (NOT medical_tests_import)
-      // RLS policy allows anonymous SELECT where is_active=true
-      // Search across test_name, test_code, and description using OR with ILIKE
+      // Query medical_tests_import table
+      // Search across test_name, test_code, synonyms, and profile_name using OR with ILIKE
       const { data, error } = await supabase
-        .from('medical_tests')
-        .select('id, test_name, test_code, body_system, customer_price, sample_type, report_delivered_in')
-        .eq('is_active', true)
-        .or(`test_name.ilike.%${term}%,test_code.ilike.%${term}%,description.ilike.%${term}%`)
+        .from('medical_tests_import')
+        .select('id, test_name, test_code, body_system, customer_price, sample_type, report_delivered_in, profile_name')
+        .or(`test_name.ilike.%${term}%,test_code.ilike.%${term}%,synonyms.ilike.%${term}%,profile_name.ilike.%${term}%`)
         .order('test_name', { ascending: true })
         .limit(MAX_RESULTS);
+
+      // Check if this is a stale response (another request was made after this one)
+      if (currentRequestId !== requestIdRef.current) {
+        if (import.meta.env.DEV) {
+          console.log(`[SearchTestsSection] Discarding stale response for "${term}" (request ${currentRequestId}, current ${requestIdRef.current})`);
+        }
+        return; // Discard stale response
+      }
 
       // Log query results in development for debugging
       if (import.meta.env.DEV) {
@@ -88,7 +131,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
           resultsCount: data?.length ?? 0,
           error: error?.message ?? null,
           errorCode: error?.code ?? null,
-          table: 'medical_tests',
+          table: 'medical_tests_import',
           data: data?.slice(0, 3) // Log first 3 results for debugging
         });
       }
@@ -115,9 +158,16 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
       if (errorObj.name === 'AbortError') {
         return;
       }
+
+      // Check if this is a stale response
+      if (currentRequestId !== requestIdRef.current) {
+        return; // Discard stale error
+      }
       
-      // Log detailed error
-      console.error('[SearchTestsSection] Search error:', errorObj);
+      // Log detailed error in development
+      if (import.meta.env.DEV) {
+        console.error('[SearchTestsSection] Search error:', errorObj);
+      }
 
       // Handle specific error cases
       if (errorObj.message?.includes('permission') || errorObj.code === '42501') {
