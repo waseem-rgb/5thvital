@@ -8,8 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 /**
  * Medical test data from the `medical_tests` table.
- * NOTE: Previously this component incorrectly queried `medical_tests_import` (a staging table
- * with admin-only RLS). The correct table is `medical_tests` which has public read access
+ * NOTE: This component queries `medical_tests` which has public read access
  * for active tests via RLS policy: "Medical tests are viewable by everyone" WHERE is_active=true
  */
 interface MedicalTest {
@@ -19,10 +18,12 @@ interface MedicalTest {
   description: string | null;
   body_system: string | null;
   customer_price: number;
+  sample_type: string | null;
+  report_delivered_in: string | null;
   is_active: boolean | null;
 }
 
-type TestSuggestion = Pick<MedicalTest, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price'>;
+type TestSuggestion = Pick<MedicalTest, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price' | 'sample_type' | 'report_delivered_in'>;
 
 interface SearchTestsSectionProps {
   onAddToCart: (test: TestSuggestion) => void;
@@ -37,16 +38,16 @@ const MAX_RESULTS = 20;
 const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [tests, setTests] = useState<TestSuggestion[]>([]);
-  const [previousTests, setPreviousTests] = useState<TestSuggestion[]>([]); // Prevent flicker
   const [searchState, setSearchState] = useState<SearchState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const previousTestsRef = useRef<TestSuggestion[]>([]); // Use ref instead of state to avoid re-renders
   const { toast } = useToast();
 
-  // Debounced search function
-  const performSearch = useCallback(async (term: string) => {
+  // Debounced search function - no state dependencies to avoid infinite loops
+  const performSearch = useCallback(async (term: string, currentTests: TestSuggestion[]) => {
     // Cancel any in-flight request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -57,15 +58,13 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     if (!isSupabaseConfigured) {
       setSearchState('error');
       setErrorMessage('Search service is not configured. Please try again later.');
-      if (import.meta.env.DEV) {
-        console.error('[SearchTestsSection] Supabase not configured - missing env vars');
-      }
+      console.error('[SearchTestsSection] Supabase not configured - missing env vars');
       return;
     }
 
-    // Keep previous results visible while loading (prevents flicker)
-    if (tests.length > 0) {
-      setPreviousTests(tests);
+    // Store current results for showing during load (prevents flicker)
+    if (currentTests.length > 0) {
+      previousTestsRef.current = currentTests;
     }
     
     setSearchState('loading');
@@ -74,11 +73,12 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     try {
       // Query the correct table: medical_tests (NOT medical_tests_import)
       // RLS policy allows anonymous SELECT where is_active=true
+      // Search across test_name, test_code, and description using OR with ILIKE
       const { data, error } = await supabase
         .from('medical_tests')
-        .select('id, test_name, test_code, body_system, customer_price')
+        .select('id, test_name, test_code, body_system, customer_price, sample_type, report_delivered_in')
         .eq('is_active', true)
-        .or(`test_name.ilike.%${term}%,description.ilike.%${term}%,test_code.ilike.%${term}%`)
+        .or(`test_name.ilike.%${term}%,test_code.ilike.%${term}%,description.ilike.%${term}%`)
         .order('test_name', { ascending: true })
         .limit(MAX_RESULTS);
 
@@ -87,7 +87,9 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
         console.log(`[SearchTestsSection] Query for "${term}":`, {
           resultsCount: data?.length ?? 0,
           error: error?.message ?? null,
-          table: 'medical_tests'
+          errorCode: error?.code ?? null,
+          table: 'medical_tests',
+          data: data?.slice(0, 3) // Log first 3 results for debugging
         });
       }
 
@@ -95,9 +97,9 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
         throw error;
       }
 
-      const results = data || [];
+      const results = (data || []) as TestSuggestion[];
       setTests(results);
-      setPreviousTests(results);
+      previousTestsRef.current = results;
       
       if (results.length > 0) {
         setSearchState('results');
@@ -107,18 +109,23 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
       
       setOpen(true);
     } catch (err) {
-      const errorObj = err as { message?: string; code?: string };
+      const errorObj = err as { message?: string; code?: string; name?: string };
       
-      // Log detailed error in development
-      if (import.meta.env.DEV) {
-        console.error('[SearchTestsSection] Search error:', errorObj);
+      // Don't treat abort as error
+      if (errorObj.name === 'AbortError') {
+        return;
       }
+      
+      // Log detailed error
+      console.error('[SearchTestsSection] Search error:', errorObj);
 
       // Handle specific error cases
       if (errorObj.message?.includes('permission') || errorObj.code === '42501') {
         setErrorMessage('Search is temporarily unavailable. Please try again later.');
       } else if (errorObj.message?.includes('not configured')) {
         setErrorMessage('Search service is not configured.');
+      } else if (errorObj.message?.includes('Failed to fetch') || errorObj.message?.includes('network')) {
+        setErrorMessage('Network error. Please check your connection.');
       } else {
         setErrorMessage('Search failed. Please try again.');
       }
@@ -126,7 +133,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
       setSearchState('error');
       setTests([]);
     }
-  }, [tests]);
+  }, []); // No dependencies - function is stable
 
   // Effect to trigger search with debounce
   useEffect(() => {
@@ -135,22 +142,23 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     // Reset state for empty/short searches
     if (!term || term.length < MIN_SEARCH_LENGTH) {
       setTests([]);
-      setPreviousTests([]);
+      previousTestsRef.current = [];
       setSearchState('idle');
       setOpen(false);
       setErrorMessage(null);
       return;
     }
 
-    // Debounce the search
+    // Debounce the search - capture current tests for the closure
+    const currentTests = tests;
     const timer = setTimeout(() => {
-      performSearch(term);
+      performSearch(term, currentTests);
     }, DEBOUNCE_MS);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [searchTerm, performSearch]);
+  }, [searchTerm]); // Only depend on searchTerm, not performSearch or tests
 
   // Cleanup abort controller on unmount
   useEffect(() => {
@@ -168,7 +176,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const handleClear = () => {
     setSearchTerm('');
     setTests([]);
-    setPreviousTests([]);
+    previousTestsRef.current = [];
     setSearchState('idle');
     setOpen(false);
     setErrorMessage(null);
@@ -178,7 +186,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const handleRetry = () => {
     const term = searchTerm.trim();
     if (term.length >= MIN_SEARCH_LENGTH) {
-      performSearch(term);
+      performSearch(term, tests);
     }
   };
 
@@ -190,7 +198,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     });
     setSearchTerm('');
     setTests([]);
-    setPreviousTests([]);
+    previousTestsRef.current = [];
     setSearchState('idle');
     setOpen(false);
 
@@ -204,8 +212,8 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   };
 
   // Determine which tests to show (previous during loading to prevent flicker)
-  const displayTests = searchState === 'loading' && previousTests.length > 0 
-    ? previousTests 
+  const displayTests = searchState === 'loading' && previousTestsRef.current.length > 0 
+    ? previousTestsRef.current 
     : tests;
 
   const searchSuggestions = displayTests.slice(0, 8);
@@ -216,14 +224,18 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
       case 'loading':
         return (
           <CommandGroup>
-            {previousTests.length > 0 ? (
+            {previousTestsRef.current.length > 0 ? (
               // Show previous results with loading indicator
               searchSuggestions.map((test) => (
                 <CommandItem key={test.id} disabled className="opacity-50">
                   <div className="flex items-center justify-between w-full p-3">
                     <div className="flex flex-col flex-1">
                       <span className="font-medium text-sm">{test.test_name}</span>
-                      <span className="text-xs text-muted-foreground">{test.body_system} • {test.test_code}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {test.test_code && <span>{test.test_code}</span>}
+                        {test.sample_type && <span> • {test.sample_type}</span>}
+                        {test.report_delivered_in && <span> • {test.report_delivered_in}</span>}
+                      </span>
                     </div>
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   </div>
@@ -274,16 +286,22 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
             {searchSuggestions.map((test) => (
               <CommandItem key={test.id} onSelect={() => handleSelectTest(test)} className="cursor-pointer">
                 <div className="flex items-center justify-between w-full p-3">
-                  <div className="flex flex-col flex-1">
-                    <span className="font-medium text-sm">{test.test_name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {test.body_system}{test.test_code ? ` • ${test.test_code}` : ''}
-                    </span>
+                  <div className="flex flex-col flex-1 min-w-0">
+                    <span className="font-semibold text-sm text-foreground truncate">{test.test_name}</span>
+                    <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                      {test.test_code && (
+                        <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] font-mono">{test.test_code}</span>
+                      )}
+                      {test.sample_type && <span>• {test.sample_type}</span>}
+                      {test.report_delivered_in && <span>• {test.report_delivered_in}</span>}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-semibold">₹{test.customer_price.toLocaleString()}</span>
-                    <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-colors">
-                      <Plus className="h-4 w-4" />
+                  <div className="flex items-center gap-3 ml-2 flex-shrink-0">
+                    {test.customer_price > 0 && (
+                      <span className="text-sm font-semibold text-primary">₹{test.customer_price.toLocaleString()}</span>
+                    )}
+                    <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors">
+                      <Plus className="h-3.5 w-3.5" />
                       Add
                     </button>
                   </div>
