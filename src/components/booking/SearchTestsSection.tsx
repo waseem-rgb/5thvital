@@ -1,63 +1,185 @@
-import { Search, Plus } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { Search, Plus, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
+import { Skeleton } from '@/components/ui/skeleton';
 
-interface MedicalTestImport {
+/**
+ * Medical test data from the `medical_tests` table.
+ * NOTE: Previously this component incorrectly queried `medical_tests_import` (a staging table
+ * with admin-only RLS). The correct table is `medical_tests` which has public read access
+ * for active tests via RLS policy: "Medical tests are viewable by everyone" WHERE is_active=true
+ */
+interface MedicalTest {
   id: string;
   test_name: string;
-  test_code: string;
+  test_code: string | null;
   description: string | null;
   body_system: string | null;
   customer_price: number;
+  is_active: boolean | null;
 }
 
-type TestSuggestion = Pick<MedicalTestImport, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price'>;
+type TestSuggestion = Pick<MedicalTest, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price'>;
 
 interface SearchTestsSectionProps {
   onAddToCart: (test: TestSuggestion) => void;
 }
 
+type SearchState = 'idle' | 'loading' | 'results' | 'empty' | 'error';
+
+const MIN_SEARCH_LENGTH = 2;
+const DEBOUNCE_MS = 300;
+const MAX_RESULTS = 20;
+
 const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [tests, setTests] = useState<TestSuggestion[]>([]);
+  const [previousTests, setPreviousTests] = useState<TestSuggestion[]>([]); // Prevent flicker
+  const [searchState, setSearchState] = useState<SearchState>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
 
-  useEffect(() => {
-    const term = searchTerm.trim();
-    if (!term) {
-      setTests([]);
-      setOpen(false);
+  // Debounced search function
+  const performSearch = useCallback(async (term: string) => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
+    // Check Supabase configuration
+    if (!isSupabaseConfigured) {
+      setSearchState('error');
+      setErrorMessage('Search service is not configured. Please try again later.');
+      if (import.meta.env.DEV) {
+        console.error('[SearchTestsSection] Supabase not configured - missing env vars');
+      }
       return;
     }
-    const timer = setTimeout(async () => {
-      try {
-        const { data, error } = await supabase
-          .from('medical_tests_import')
-          .select('id, test_name, test_code, body_system, customer_price')
-          .or(`test_name.ilike.%${term}%,description.ilike.%${term}%`)
-          .limit(20);
-        
-        if (error) throw error;
-        setTests(data || []);
-        setOpen(true);
-      } catch (err) {
-        console.error('Search failed:', err);
-        setTests([]);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
 
-  const searchSuggestions = tests.slice(0, 8);
+    // Keep previous results visible while loading (prevents flicker)
+    if (tests.length > 0) {
+      setPreviousTests(tests);
+    }
+    
+    setSearchState('loading');
+    setErrorMessage(null);
+
+    try {
+      // Query the correct table: medical_tests (NOT medical_tests_import)
+      // RLS policy allows anonymous SELECT where is_active=true
+      const { data, error } = await supabase
+        .from('medical_tests')
+        .select('id, test_name, test_code, body_system, customer_price')
+        .eq('is_active', true)
+        .or(`test_name.ilike.%${term}%,description.ilike.%${term}%,test_code.ilike.%${term}%`)
+        .order('test_name', { ascending: true })
+        .limit(MAX_RESULTS);
+
+      // Log query results in development for debugging
+      if (import.meta.env.DEV) {
+        console.log(`[SearchTestsSection] Query for "${term}":`, {
+          resultsCount: data?.length ?? 0,
+          error: error?.message ?? null,
+          table: 'medical_tests'
+        });
+      }
+
+      if (error) {
+        throw error;
+      }
+
+      const results = data || [];
+      setTests(results);
+      setPreviousTests(results);
+      
+      if (results.length > 0) {
+        setSearchState('results');
+      } else {
+        setSearchState('empty');
+      }
+      
+      setOpen(true);
+    } catch (err) {
+      const errorObj = err as { message?: string; code?: string };
+      
+      // Log detailed error in development
+      if (import.meta.env.DEV) {
+        console.error('[SearchTestsSection] Search error:', errorObj);
+      }
+
+      // Handle specific error cases
+      if (errorObj.message?.includes('permission') || errorObj.code === '42501') {
+        setErrorMessage('Search is temporarily unavailable. Please try again later.');
+      } else if (errorObj.message?.includes('not configured')) {
+        setErrorMessage('Search service is not configured.');
+      } else {
+        setErrorMessage('Search failed. Please try again.');
+      }
+      
+      setSearchState('error');
+      setTests([]);
+    }
+  }, [tests]);
+
+  // Effect to trigger search with debounce
+  useEffect(() => {
+    const term = searchTerm.trim();
+    
+    // Reset state for empty/short searches
+    if (!term || term.length < MIN_SEARCH_LENGTH) {
+      setTests([]);
+      setPreviousTests([]);
+      setSearchState('idle');
+      setOpen(false);
+      setErrorMessage(null);
+      return;
+    }
+
+    // Debounce the search
+    const timer = setTimeout(() => {
+      performSearch(term);
+    }, DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [searchTerm, performSearch]);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
-    setOpen(e.target.value.length > 0);
+  };
+
+  const handleClear = () => {
+    setSearchTerm('');
+    setTests([]);
+    setPreviousTests([]);
+    setSearchState('idle');
+    setOpen(false);
+    setErrorMessage(null);
+    inputRef.current?.focus();
+  };
+
+  const handleRetry = () => {
+    const term = searchTerm.trim();
+    if (term.length >= MIN_SEARCH_LENGTH) {
+      performSearch(term);
+    }
   };
 
   const handleSelectTest = (test: TestSuggestion) => {
@@ -68,6 +190,8 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     });
     setSearchTerm('');
     setTests([]);
+    setPreviousTests([]);
+    setSearchState('idle');
     setOpen(false);
 
     // Scroll to cart section after adding
@@ -77,6 +201,101 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
         cartElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     }, 300);
+  };
+
+  // Determine which tests to show (previous during loading to prevent flicker)
+  const displayTests = searchState === 'loading' && previousTests.length > 0 
+    ? previousTests 
+    : tests;
+
+  const searchSuggestions = displayTests.slice(0, 8);
+
+  // Render content based on search state
+  const renderCommandContent = () => {
+    switch (searchState) {
+      case 'loading':
+        return (
+          <CommandGroup>
+            {previousTests.length > 0 ? (
+              // Show previous results with loading indicator
+              searchSuggestions.map((test) => (
+                <CommandItem key={test.id} disabled className="opacity-50">
+                  <div className="flex items-center justify-between w-full p-3">
+                    <div className="flex flex-col flex-1">
+                      <span className="font-medium text-sm">{test.test_name}</span>
+                      <span className="text-xs text-muted-foreground">{test.body_system} • {test.test_code}</span>
+                    </div>
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  </div>
+                </CommandItem>
+              ))
+            ) : (
+              // Show skeleton loaders
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="p-3">
+                  <Skeleton className="h-5 w-3/4 mb-2" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+              ))
+            )}
+          </CommandGroup>
+        );
+
+      case 'error':
+        return (
+          <div className="p-6 text-center">
+            <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
+            <p className="text-sm text-destructive mb-3">{errorMessage || 'Search failed'}</p>
+            <button
+              onClick={handleRetry}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Retry
+            </button>
+          </div>
+        );
+
+      case 'empty':
+        return (
+          <div className="p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              No tests found matching "{searchTerm}"
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Try a different search term or check the spelling
+            </p>
+          </div>
+        );
+
+      case 'results':
+        return (
+          <CommandGroup>
+            {searchSuggestions.map((test) => (
+              <CommandItem key={test.id} onSelect={() => handleSelectTest(test)} className="cursor-pointer">
+                <div className="flex items-center justify-between w-full p-3">
+                  <div className="flex flex-col flex-1">
+                    <span className="font-medium text-sm">{test.test_name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {test.body_system}{test.test_code ? ` • ${test.test_code}` : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm font-semibold">₹{test.customer_price.toLocaleString()}</span>
+                    <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-colors">
+                      <Plus className="h-4 w-4" />
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        );
+
+      default:
+        return <CommandEmpty>Type at least {MIN_SEARCH_LENGTH} characters to search</CommandEmpty>;
+    }
   };
 
   return (
@@ -99,37 +318,30 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
                   <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground z-10" />
                   <input
                     ref={inputRef}
-                    type="search"
-                    placeholder="Search for tests or profiles..."
+                    type="text"
+                    placeholder="Search for tests (e.g., lipid, thyroid, CBC)..."
                     value={searchTerm}
                     onChange={handleSearch}
-                    className="w-full h-14 md:h-16 pl-14 pr-6 rounded-full bg-white text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary shadow-lg text-sm md:text-base border border-border"
+                    className="w-full h-14 md:h-16 pl-14 pr-12 rounded-full bg-white text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary shadow-lg text-sm md:text-base border border-border"
                   />
+                  {searchTerm && (
+                    <button
+                      onClick={handleClear}
+                      className="absolute right-5 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
+                      aria-label="Clear search"
+                    >
+                      ×
+                    </button>
+                  )}
+                  {searchState === 'loading' && (
+                    <Loader2 className="absolute right-12 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                  )}
                 </div>
               </PopoverAnchor>
               <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[600px] p-0 z-50" align="start" side="bottom" sideOffset={8}>
                 <Command>
                   <CommandList className="max-h-[400px]">
-                    <CommandEmpty>No tests found.</CommandEmpty>
-                    <CommandGroup>
-                      {searchSuggestions.map((test) => (
-                        <CommandItem key={test.id} onSelect={() => handleSelectTest(test)} className="cursor-pointer">
-                          <div className="flex items-center justify-between w-full p-3">
-                            <div className="flex flex-col flex-1">
-                              <span className="font-medium text-sm">{test.test_name}</span>
-                              <span className="text-xs text-muted-foreground">{test.body_system} • {test.test_code}</span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <span className="text-sm font-semibold">₹{test.customer_price.toLocaleString()}</span>
-                              <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-2 transition-colors">
-                                <Plus className="h-4 w-4" />
-                                Add
-                              </button>
-                            </div>
-                          </div>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
+                    {renderCommandContent()}
                   </CommandList>
                 </Command>
               </PopoverContent>
