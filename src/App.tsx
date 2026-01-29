@@ -10,10 +10,18 @@ import Dashboard from "./pages/Dashboard";
 import Auth from "./pages/Auth";
 import HealthPackageDetails from "./pages/HealthPackageDetails";
 import NotFound from "./pages/NotFound";
+import { ConfigErrorBanner } from "./components/ConfigErrorBanner";
+import { isSupabaseConfigured } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient();
 
-const App = () => (
+const App = () => {
+  // Show configuration error page if Supabase env vars are missing
+  if (!isSupabaseConfigured) {
+    return <ConfigErrorBanner />;
+  }
+
+  return (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <TooltipProvider>
@@ -34,6 +42,7 @@ const App = () => (
       </TooltipProvider>
     </AuthProvider>
   </QueryClientProvider>
-);
+  );
+};
 
 export default App;
