@@ -5,19 +5,16 @@ import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
 
-interface MedicalTest {
+interface MedicalTestImport {
   id: string;
   test_name: string;
   test_code: string;
-  description: string;
-  body_system: string;
+  description: string | null;
+  body_system: string | null;
   customer_price: number;
-  report_delivered_in: string;
-  sample_type: string;
-  profile_name: string;
 }
 
-type TestSuggestion = Pick<MedicalTest, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price'>;
+type TestSuggestion = Pick<MedicalTestImport, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price'>;
 
 interface SearchTestsSectionProps {
   onAddToCart: (test: TestSuggestion) => void;
@@ -32,26 +29,27 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
 
   useEffect(() => {
     const term = searchTerm.trim();
-    if (!term) { 
-      setTests([]); 
-      setOpen(false); 
-      return; 
+    if (!term) {
+      setTests([]);
+      setOpen(false);
+      return;
     }
     const timer = setTimeout(async () => {
       try {
         const { data, error } = await supabase
-          .from('medical_tests')
+          .from('medical_tests_import')
           .select('id, test_name, test_code, body_system, customer_price')
-          .eq('is_active', true)
-          .or(`test_name.ilike.%${term}%,description.ilike.%${term}%,body_system.ilike.%${term}%,test_code.ilike.%${term}%`);
+          .or(`test_name.ilike.%${term}%,description.ilike.%${term}%`)
+          .limit(20);
         
         if (error) throw error;
         setTests(data || []);
         setOpen(true);
       } catch (err) {
         console.error('Search failed:', err);
+        setTests([]);
       }
-    }, 200);
+    }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 

@@ -75,16 +75,53 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
 
   // Pre-fill user data if authenticated
   useEffect(() => {
-    if (user && user.email && !bookingData.customerEmail) {
-      // Skip pre-filling if email is a dummy email from phone authentication
-      if (!user.email.includes('@shendetlabs.local')) {
-        setBookingData(prev => ({
-          ...prev,
-          customerEmail: user.email || ''
-        }));
-      }
+    if (user) {
+      // Check if email is a dummy/fake email from phone OTP authentication
+      // These have .local TLD or specific patterns like @phone.5thvital.local
+      const isFakeEmail = (email: string | undefined): boolean => {
+        if (!email) return true;
+        return email.endsWith('.local') || email.includes('@phone.');
+      };
+
+      setBookingData(prev => {
+        const updates: Partial<typeof prev> = {};
+        
+        // Pre-fill email ONLY if it's a real email (not a fake OTP-generated one)
+        if (user.email && !prev.customerEmail && !isFakeEmail(user.email)) {
+          updates.customerEmail = user.email;
+        }
+        
+        // Pre-fill phone from user metadata or user.phone if available
+        const userPhone = user.user_metadata?.phone || user.phone;
+        if (userPhone && prev.customerPhone === '+91 ') {
+          // Format phone - ensure it has +91 prefix
+          let formattedPhone = userPhone.trim();
+          if (!formattedPhone.startsWith('+')) {
+            formattedPhone = '+' + formattedPhone;
+          }
+          // If it's just digits, add +91
+          if (!formattedPhone.includes(' ') && formattedPhone.length >= 10) {
+            const digits = formattedPhone.replace(/\D/g, '');
+            if (digits.length === 10) {
+              formattedPhone = '+91 ' + digits;
+            } else if (digits.length === 12 && digits.startsWith('91')) {
+              formattedPhone = '+91 ' + digits.slice(2);
+            }
+          }
+          // Only update if we have a proper formatted phone
+          if (formattedPhone.startsWith('+91') && formattedPhone.replace(/\D/g, '').length >= 12) {
+            updates.customerPhone = formattedPhone.replace('+91', '+91 ');
+          }
+        }
+        
+        // Only update if there are changes
+        if (Object.keys(updates).length > 0) {
+          return { ...prev, ...updates };
+        }
+        return prev;
+      });
     }
-  }, [user, bookingData.customerEmail]);
+  }, [user]);
 
   // Home collection slots - only between 6am-11am
   const timeSlots = [

@@ -223,6 +223,36 @@ export type Database = {
         }
         Relationships: []
       }
+      medical_tests_import: {
+        Row: {
+          id: string
+          test_name: string
+          test_code: string
+          description: string | null
+          body_system: string | null
+          customer_price: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          test_name: string
+          test_code: string
+          description?: string | null
+          body_system?: string | null
+          customer_price: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          test_name?: string
+          test_code?: string
+          description?: string | null
+          body_system?: string | null
+          customer_price?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
       otp_verifications: {
         Row: {
           created_at: string
