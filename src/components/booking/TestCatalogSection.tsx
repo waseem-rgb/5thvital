@@ -6,16 +6,22 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, Plus } from 'lucide-react';
 import type { CartItem } from '@/types/booking';
 
-interface MedicalTest {
+/**
+ * Medical test data from the `medical_tests_import` table.
+ * This table contains the imported test catalog data with public read access.
+ * Note: This component uses the same table as SearchTestsSection for consistency.
+ */
+interface MedicalTestImport {
   id: string;
   test_name: string;
-  test_code: string;
+  test_code: string | null;
   description: string | null;
   body_system: string | null;
   customer_price: number;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
+  sample_type: string | null;
+  report_delivered_in: string | null;
+  synonyms: string | null;
+  profile_name: string | null;
 }
 
 interface TestCatalogSectionProps {
@@ -23,7 +29,7 @@ interface TestCatalogSectionProps {
 }
 
 const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
-  const [tests, setTests] = useState<MedicalTest[]>([]);
+  const [tests, setTests] = useState<MedicalTestImport[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBodySystem, setSelectedBodySystem] = useState<string>('Cardiovascular');
   const [loading, setLoading] = useState(true);
@@ -36,13 +42,24 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
   useEffect(() => {
     const fetchTests = async () => {
       try {
+        // Query medical_tests_import table (not medical_tests)
+        // No is_active filter needed as all imported tests are active
         const { data, error } = await supabase
-          .from('medical_tests')
-          .select('*')
-          .eq('is_active', true)
+          .from('medical_tests_import')
+          .select('id, test_name, test_code, description, body_system, customer_price, sample_type, report_delivered_in, synonyms, profile_name')
           .order('body_system', { ascending: true });
 
-        if (error) throw error;
+        if (error) {
+          if (import.meta.env.DEV) {
+            console.error('[TestCatalog] Error fetching tests:', error);
+          }
+          throw error;
+        }
+        
+        if (import.meta.env.DEV) {
+          console.log(`[TestCatalog] Loaded ${data?.length || 0} tests from medical_tests_import`);
+        }
+        
         setTests(data || []);
       } catch (error) {
         console.error('Error fetching tests:', error);
@@ -57,23 +74,32 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
   // Search suggestions across all tests
   const searchSuggestions = tests.filter(test => {
     if (!searchQuery) return false;
-    return test.test_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           test.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           test.body_system.toLowerCase().includes(searchQuery.toLowerCase()) ||
-           test.test_code.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = searchQuery.toLowerCase();
+    return (
+      test.test_name?.toLowerCase().includes(query) ||
+      test.description?.toLowerCase().includes(query) ||
+      test.body_system?.toLowerCase().includes(query) ||
+      test.test_code?.toLowerCase().includes(query) ||
+      test.synonyms?.toLowerCase().includes(query) ||
+      test.profile_name?.toLowerCase().includes(query)
+    );
   }).slice(0, 10); // Limit to 10 suggestions
 
   const filteredTests = tests.filter(test => {
-    const matchesSearch = test.test_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         test.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         test.body_system.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = searchQuery.toLowerCase();
+    const matchesSearch = !searchQuery || (
+      test.test_name?.toLowerCase().includes(query) ||
+      test.description?.toLowerCase().includes(query) ||
+      test.body_system?.toLowerCase().includes(query) ||
+      test.synonyms?.toLowerCase().includes(query)
+    );
     
     const matchesBodySystem = test.body_system === selectedBodySystem;
     
     return matchesSearch && matchesBodySystem;
   });
 
-  const handleAddToCart = (test: MedicalTest) => {
+  const handleAddToCart = (test: MedicalTestImport) => {
     onAddToCart({
       id: test.id,
       type: 'test',
@@ -82,9 +108,11 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
     });
   };
 
-  const handleSelectTest = (test: MedicalTest) => {
+  const handleSelectTest = (test: MedicalTestImport) => {
     setSearchQuery(test.test_name);
-    setSelectedBodySystem(test.body_system);
+    if (test.body_system) {
+      setSelectedBodySystem(test.body_system);
+    }
     setOpen(false);
     handleAddToCart(test);
   };
@@ -136,7 +164,10 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
                       <div className="flex items-center justify-between w-full">
                         <div className="flex flex-col">
                           <span className="font-medium">{test.test_name}</span>
-                          <span className="text-xs text-muted-foreground">{test.body_system}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {test.body_system}
+                            {test.test_code && ` • ${test.test_code}`}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold text-primary">₹{test.customer_price.toLocaleString()}</span>

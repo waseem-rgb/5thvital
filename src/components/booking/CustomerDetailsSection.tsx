@@ -9,7 +9,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CalendarIcon, CheckCircle, Shield, User } from 'lucide-react';
+import { CalendarIcon, CheckCircle, Shield, User, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -29,18 +29,92 @@ interface CustomerDetailsSectionProps {
   cartItems: TestItem[];
 }
 
+/**
+ * Parse Supabase error for user-friendly message.
+ */
+const parseSupabaseError = (error: unknown): string => {
+  if (!error) return 'Unknown error';
+  
+  if (typeof error === 'string') return error;
+  
+  const errorObj = error as Record<string, unknown>;
+  
+  // Supabase PostgrestError
+  if (errorObj.message && typeof errorObj.message === 'string') {
+    const msg = errorObj.message;
+    
+    // Foreign key constraint
+    if (msg.includes('foreign key constraint')) {
+      return 'Invalid test reference. Please refresh and try again.';
+    }
+    
+    // Unique constraint
+    if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
+      return 'This booking may already exist. Please check your dashboard.';
+    }
+    
+    // Permission error
+    if (msg.includes('permission denied') || errorObj.code === '42501') {
+      return 'Permission denied. Please try logging in again.';
+    }
+    
+    // Connection error
+    if (msg.includes('Failed to fetch') || msg.includes('network')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+    
+    return msg;
+  }
+  
+  // Edge function error
+  if (errorObj.name === 'FunctionsHttpError') {
+    return 'Server error. Please try again.';
+  }
+  
+  return JSON.stringify(error);
+};
+
+/**
+ * Setup dev-only booking debug helpers
+ */
+const setupBookingDevHelpers = (
+  getBookingPayload: () => Record<string, unknown> | null,
+  lastError: { current: unknown }
+) => {
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    // Simulate booking payload (for debugging)
+    (window as unknown as Record<string, unknown>).__simulateBookingPayload = () => {
+      const payload = getBookingPayload();
+      console.log('[DEV] Current booking payload:', payload);
+      return payload;
+    };
+
+    // Get last booking error
+    (window as unknown as Record<string, unknown>).__getLastBookingError = () => {
+      console.log('[DEV] Last booking error:', lastError.current);
+      return lastError.current;
+    };
+
+    console.log('[DEV] Booking debug helpers available:');
+    console.log('  - window.__simulateBookingPayload() - Show current booking payload');
+    console.log('  - window.__getLastBookingError() - Show last booking error');
+  }
+};
+
 const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [bookingId, setBookingId] = useState<string>('');
+  const [lastErrorRef] = useState<{ current: unknown }>({ current: null });
+  const [debugError, setDebugError] = useState<string | null>(null);
   const [smsStatus, setSmsStatus] = useState<{
     sent: boolean;
     error?: string;
     errorCode?: string;
     formattedPhone?: string;
-    twilioError?: any;
+    twilioError?: unknown;
   }>({ sent: false });
   const [showAccountCreation, setShowAccountCreation] = useState(false);
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
@@ -72,6 +146,41 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
   };
 
   const { toast } = useToast();
+
+  // Setup dev helpers
+  useEffect(() => {
+    const getBookingPayload = () => {
+      if (cartItems.length === 0) return null;
+      
+      const formattedPhone = bookingData.customerPhone.trim().replace(/\D/g, '');
+      const phoneWithCode = formattedPhone.length === 10 ? '+91' + formattedPhone : '+' + formattedPhone;
+      
+      return {
+        user_id: user?.id || null,
+        customer_name: bookingData.customerName,
+        customer_phone: phoneWithCode,
+        customer_email: bookingData.customerEmail,
+        customer_age: bookingData.customerAge ? parseInt(bookingData.customerAge) : null,
+        customer_gender: bookingData.customerGender || null,
+        address: bookingData.address,
+        preferred_date: bookingData.preferredDate?.toISOString().split('T')[0],
+        preferred_time: bookingData.preferredTime,
+        total_amount: getTotalAmount(),
+        discount_percentage: bookingData.discountPercentage,
+        discount_amount: getDiscountAmount(),
+        final_amount: getFinalAmount(),
+        coupon_code: couponStatus.applied ? bookingData.couponCode : null,
+        notes: bookingData.notes || null,
+        cart_items: cartItems.map(item => ({
+          item_id: item.id,
+          item_name: item.test_name,
+          unit_price: item.customer_price
+        }))
+      };
+    };
+    
+    setupBookingDevHelpers(getBookingPayload, lastErrorRef);
+  }, [cartItems, bookingData, user, couponStatus.applied, lastErrorRef]);
 
   // Pre-fill user data if authenticated
   useEffect(() => {
@@ -209,10 +318,19 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('🟢 Booking form submitted');
+    
+    if (import.meta.env.DEV) {
+      console.log('🟢 [Booking] Form submitted');
+    }
+    
+    // Clear any previous debug error
+    setDebugError(null);
+    lastErrorRef.current = null;
     
     if (cartItems.length === 0) {
-      console.log('❌ No tests selected');
+      if (import.meta.env.DEV) {
+        console.log('❌ [Booking] No tests selected');
+      }
       toast({
         title: "No Tests Selected",
         description: "Please select at least one test to proceed.",
@@ -221,15 +339,24 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       return;
     }
 
-    console.log('🟢 Starting booking process with data:', {
-      customerName: bookingData.customerName,
-      customerPhone: bookingData.customerPhone,
-      totalAmount: getTotalAmount(),
-      finalAmount: getFinalAmount(),
-      cartItems: cartItems.length
-    });
+    if (import.meta.env.DEV) {
+      console.log('🟢 [Booking] Starting booking process:', {
+        customerName: bookingData.customerName,
+        customerPhone: bookingData.customerPhone,
+        totalAmount: getTotalAmount(),
+        finalAmount: getFinalAmount(),
+        cartItemCount: cartItems.length,
+        cartItems: cartItems.map(i => ({ id: i.id, name: i.test_name }))
+      });
+    }
 
     setIsSubmitting(true);
+
+    // Variables to track what succeeded
+    let bookingCreated = false;
+    let createdBookingId: string | null = null;
+    let customBookingId: string | null = null;
+    let bookingItemsCreated = false;
 
     try {
       // Format phone number with +91 if no country code
@@ -262,8 +389,11 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         formattedTime = `${hour24.toString().padStart(2, '0')}:${minutes}:00`;
       }
 
-      // Create booking (guest or authenticated user)
-      console.log('🟢 Creating booking in database...');
+      // STEP 1: Create booking (guest or authenticated user)
+      if (import.meta.env.DEV) {
+        console.log('🟢 [Booking] Step 1: Creating booking in database...');
+      }
+      
       const bookingData_insert = {
         user_id: user?.id || null,  // Allow null for guest bookings
         customer_name: bookingData.customerName,
@@ -289,13 +419,27 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         .single();
 
       if (bookingError) {
-        console.error('❌ Booking creation failed:', bookingError);
+        if (import.meta.env.DEV) {
+          console.error('❌ [Booking] Step 1 FAILED - Booking creation error:', bookingError);
+        }
+        lastErrorRef.current = bookingError;
         throw bookingError;
       }
       
-      console.log('✅ Booking created successfully:', booking.id);
+      // Mark booking as created
+      bookingCreated = true;
+      createdBookingId = booking.id;
+      customBookingId = booking.custom_booking_id;
+      
+      if (import.meta.env.DEV) {
+        console.log('✅ [Booking] Step 1 SUCCESS - Booking created:', booking.id);
+      }
 
-      // Create booking items
+      // STEP 2: Create booking items
+      if (import.meta.env.DEV) {
+        console.log('🟢 [Booking] Step 2: Creating booking items...');
+      }
+      
       const bookingItems = cartItems.map(item => ({
         booking_id: booking.id,
         item_type: 'test',
@@ -310,13 +454,32 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         .from('booking_items')
         .insert(bookingItems);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        if (import.meta.env.DEV) {
+          console.error('❌ [Booking] Step 2 FAILED - Booking items error:', itemsError);
+          console.error('  Booking was created but items failed. Booking ID:', booking.id);
+        }
+        lastErrorRef.current = itemsError;
+        throw itemsError;
+      }
+      
+      // Mark booking items as created
+      bookingItemsCreated = true;
+      
+      if (import.meta.env.DEV) {
+        console.log('✅ [Booking] Step 2 SUCCESS - Booking items created:', bookingItems.length, 'items');
+      }
 
+      // CRITICAL: Both booking AND booking_items succeeded - show success UI
       setIsSuccess(true);
       setBookingId(booking.custom_booking_id || booking.id);
       
-      // Send SMS notification
-      console.log('🟢 Sending SMS notification...');
+      // STEP 3: Send SMS notification (NON-BLOCKING - failures here do NOT fail the booking)
+      if (import.meta.env.DEV) {
+        console.log('🟢 [Booking] Step 3: Sending SMS notification (non-blocking)...');
+      }
+      
+      // Wrap SMS in its own try-catch to ensure it never throws
       try {
         const { data: smsResult, error: smsError } = await supabase.functions.invoke('send-booking-sms', {
           body: {
@@ -330,49 +493,88 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         });
         
         if (smsError) {
-          console.error('❌ SMS sending failed:', smsError);
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ [Booking] Step 3 - SMS sending failed (non-critical):', smsError);
+          }
           setSmsStatus({
             sent: false,
-            error: smsError.message,
-            errorCode: smsError.code,
+            error: smsError.message || 'SMS service error',
+            errorCode: (smsError as unknown as Record<string, string>).code,
             formattedPhone: formattedPhone
           });
         } else if (smsResult?.success) {
-          console.log('✅ SMS sent successfully:', smsResult);
+          if (import.meta.env.DEV) {
+            console.log('✅ [Booking] Step 3 SUCCESS - SMS sent:', smsResult);
+          }
           setSmsStatus({
             sent: true,
             formattedPhone: formattedPhone
           });
         } else {
-          console.error('❌ SMS failed with result:', smsResult);
+          if (import.meta.env.DEV) {
+            console.warn('⚠️ [Booking] Step 3 - SMS failed with result:', smsResult);
+          }
           setSmsStatus({
             sent: false,
-            error: smsResult?.error || 'Unknown error',
+            error: smsResult?.error || 'Unknown SMS error',
             errorCode: smsResult?.errorCode,
             twilioError: smsResult?.details,
             formattedPhone: smsResult?.formattedPhone || formattedPhone
           });
         }
-      } catch (smsError: any) {
-        console.error('❌ SMS sending error:', smsError);
+      } catch (smsException: unknown) {
+        // SMS exception should NEVER bubble up to fail the booking
+        if (import.meta.env.DEV) {
+          console.warn('⚠️ [Booking] Step 3 - SMS exception (non-critical):', smsException);
+        }
         setSmsStatus({
           sent: false,
-          error: smsError?.message || 'Network error',
+          error: smsException instanceof Error ? smsException.message : 'Network error',
           formattedPhone: formattedPhone
         });
       }
 
+      // Show success toast - booking is complete regardless of SMS status
       toast({
         title: "Booking Confirmed!",
         description: "Your booking has been successfully submitted. We'll contact you soon.",
       });
+      
+      if (import.meta.env.DEV) {
+        console.log('✅ [Booking] COMPLETE - Booking flow finished successfully');
+      }
+      
     } catch (error) {
-      console.error('Error creating booking:', error);
-      toast({
-        title: "Booking Failed",
-        description: "There was an error processing your booking. Please try again.",
-        variant: "destructive"
-      });
+      // This catch only handles booking/booking_items errors, NOT SMS errors
+      const errorMessage = parseSupabaseError(error);
+      
+      if (import.meta.env.DEV) {
+        console.error('❌ [Booking] ERROR:', {
+          error,
+          parsedMessage: errorMessage,
+          bookingCreated,
+          bookingItemsCreated,
+          bookingId: createdBookingId
+        });
+      }
+      
+      lastErrorRef.current = error;
+      setDebugError(import.meta.env.DEV ? errorMessage : null);
+      
+      // If booking was created but items failed, show partial success
+      if (bookingCreated && !bookingItemsCreated) {
+        toast({
+          title: "Partial Booking Issue",
+          description: `Your booking was created (ID: ${customBookingId || createdBookingId}) but there was an issue adding the test items. Please contact support.`,
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Booking Failed",
+          description: errorMessage,
+          variant: "destructive"
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -381,7 +583,10 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
   const handleResendSms = async () => {
     if (!bookingId) return;
     
-    console.log('🔄 Resending SMS...');
+    if (import.meta.env.DEV) {
+      console.log('🔄 [Booking] Resending SMS...');
+    }
+    
     try {
       const { data: smsResult, error: smsError } = await supabase.functions.invoke('send-booking-sms', {
         body: {
@@ -395,15 +600,19 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       });
       
       if (smsError) {
-        console.error('❌ SMS resend failed:', smsError);
+        if (import.meta.env.DEV) {
+          console.error('❌ [Booking] SMS resend failed:', smsError);
+        }
         setSmsStatus(prev => ({
           ...prev,
           sent: false,
           error: smsError.message,
-          errorCode: smsError.code
+          errorCode: (smsError as unknown as Record<string, string>).code
         }));
       } else if (smsResult?.success) {
-        console.log('✅ SMS resent successfully');
+        if (import.meta.env.DEV) {
+          console.log('✅ [Booking] SMS resent successfully');
+        }
         setSmsStatus(prev => ({ ...prev, sent: true, error: undefined }));
         toast({
           title: "SMS Sent!",
@@ -416,11 +625,13 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
           error: smsResult?.error || 'Unknown error'
         }));
       }
-    } catch (error: any) {
-      console.error('❌ SMS resend error:', error);
+    } catch (error: unknown) {
+      if (import.meta.env.DEV) {
+        console.error('❌ [Booking] SMS resend error:', error);
+      }
       toast({
         title: "Failed to resend SMS",
-        description: error?.message || 'Network error',
+        description: error instanceof Error ? error.message : 'Network error',
         variant: "destructive"
       });
     }
@@ -494,9 +705,9 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                         {smsStatus.errorCode && ` (Code: ${smsStatus.errorCode})`}
                       </p>
                     )}
-                    {smsStatus.twilioError && (
+                    {import.meta.env.DEV && smsStatus.twilioError && (
                       <details className="text-xs">
-                        <summary className="cursor-pointer text-red-600">Twilio Details</summary>
+                        <summary className="cursor-pointer text-red-600">Twilio Details (dev only)</summary>
                         <pre className="mt-1 p-2 bg-red-50 rounded text-red-700 overflow-auto">
                           {JSON.stringify(smsStatus.twilioError, null, 2)}
                         </pre>
@@ -609,10 +820,10 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                         });
                         setShowAccountCreation(false);
                       }
-                    } catch (error: any) {
+                    } catch (error: unknown) {
                       toast({
                         title: "Error",
-                        description: error.message || "Failed to create account",
+                        description: error instanceof Error ? error.message : "Failed to create account",
                         variant: "destructive"
                       });
                     } finally {
@@ -666,6 +877,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                   setSmsStatus({ sent: false });
                   setCouponStatus({ applied: false, message: '', discount: 0 });
                   setBookingId('');
+                  setDebugError(null);
                 }}
                 className="w-full"
               >
@@ -682,6 +894,16 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
     <section className="min-h-screen bg-gray-50">
       <div className="container mx-auto px-4 sm:px-6 max-w-4xl py-8 sm:py-12">
         <div className="space-y-4 sm:space-y-6">
+          {/* Debug Error Banner (dev only) */}
+          {import.meta.env.DEV && debugError && (
+            <Alert variant="destructive" className="bg-red-50 border-red-200">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription className="text-sm">
+                <strong>Debug:</strong> {debugError}
+              </AlertDescription>
+            </Alert>
+          )}
+          
           {/* Authentication Benefits Banner */}
           {!user && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
