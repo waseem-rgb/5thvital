@@ -292,6 +292,33 @@ export type Database = {
         }
         Relationships: []
       }
+      packages: {
+        Row: {
+          id: string
+          slug: string
+          title: string
+          status: string
+          is_featured: boolean
+          sort_order: number | null
+        }
+        Insert: {
+          id?: string
+          slug: string
+          title: string
+          status?: string
+          is_featured?: boolean
+          sort_order?: number | null
+        }
+        Update: {
+          id?: string
+          slug?: string
+          title?: string
+          status?: string
+          is_featured?: boolean
+          sort_order?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

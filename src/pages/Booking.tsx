@@ -1,5 +1,6 @@
 import BookingHero from '@/components/booking/BookingHero';
 import HealthScreeningSection from '@/components/booking/HealthScreeningSection';
+import PackagesSection from '@/components/booking/PackagesSection';
 import SearchTestsSection from '@/components/booking/SearchTestsSection';
 import CartSection from '@/components/booking/CartSection';
 import CustomerDetailsSection from '@/components/booking/CustomerDetailsSection';
@@ -243,13 +244,16 @@ const Booking = () => {
         {/* 2. Health Screening Packages Section */}
         <HealthScreeningSection onAddToCart={handleAddToCart} />
 
-        {/* 3. Search Tests Section */}
+        {/* 3. Featured Packages Section */}
+        <PackagesSection />
+
+        {/* 4. Search Tests Section */}
         <SearchTestsSection onAddToCart={handleAddToCart} />
 
-        {/* 4. Prescription Upload Section */}
+        {/* 5. Prescription Upload Section */}
         <PrescriptionUploadSection />
 
-        {/* 5. Cart and Customer Details - Only visible when cart has items */}
+        {/* 6. Cart and Customer Details - Only visible when cart has items */}
         {cartItems.length > 0 && (
           <Accordion 
             type="multiple" 

@@ -9,6 +9,7 @@ import OrderDetails from "./pages/OrderDetails";
 import Dashboard from "./pages/Dashboard";
 import Auth from "./pages/Auth";
 import HealthPackageDetails from "./pages/HealthPackageDetails";
+import PackageDetails from "./pages/PackageDetails";
 import NotFound from "./pages/NotFound";
 import { ConfigErrorBanner } from "./components/ConfigErrorBanner";
 import { isSupabaseConfigured } from "@/integrations/supabase/client";
@@ -35,6 +36,7 @@ const App = () => {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/order/:orderId" element={<OrderDetails />} />
             <Route path="/package/:slug" element={<HealthPackageDetails />} />
+            <Route path="/packages/:slug" element={<PackageDetails />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

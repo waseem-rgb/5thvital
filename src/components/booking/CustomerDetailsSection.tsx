@@ -30,40 +30,75 @@ interface CustomerDetailsSectionProps {
 }
 
 /**
+ * Check if an error is a transient network error that can be retried.
+ */
+function isRetryableError(error: unknown): boolean {
+  if (!error) return false;
+  
+  const errorObj = error as Record<string, unknown>;
+  const message = String(errorObj.message || '').toLowerCase();
+  const name = String(errorObj.name || '').toLowerCase();
+  
+  // Common transient network errors (including iOS Safari "Load failed")
+  const retryablePatterns = [
+    'load failed',
+    'failed to fetch',
+    'network error',
+    'networkerror',
+    'timeout',
+    'aborted',
+    'connection refused',
+    'econnreset',
+    'enotfound',
+    'dns'
+  ];
+  
+  return retryablePatterns.some(function(pattern) {
+    return message.includes(pattern) || name.includes(pattern);
+  });
+}
+
+/**
  * Parse Supabase error for user-friendly message.
  */
-const parseSupabaseError = (error: unknown): string => {
+function parseSupabaseError(error: unknown): string {
   if (!error) return 'Unknown error';
   
   if (typeof error === 'string') return error;
   
   const errorObj = error as Record<string, unknown>;
+  const errorMessage = String(errorObj.message || '');
+  const errorName = String(errorObj.name || '');
+  
+  // Network/Load failed errors (common on iOS Safari)
+  if (errorMessage.toLowerCase().includes('load failed') ||
+      errorName.toLowerCase().includes('typeerror')) {
+    return 'Network connection issue. Please check your internet and try again.';
+  }
   
   // Supabase PostgrestError
-  if (errorObj.message && typeof errorObj.message === 'string') {
-    const msg = errorObj.message;
-    
+  if (errorMessage) {
     // Foreign key constraint
-    if (msg.includes('foreign key constraint')) {
+    if (errorMessage.includes('foreign key constraint')) {
       return 'Invalid test reference. Please refresh and try again.';
     }
     
     // Unique constraint
-    if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
+    if (errorMessage.includes('duplicate key') || errorMessage.includes('unique constraint')) {
       return 'This booking may already exist. Please check your dashboard.';
     }
     
     // Permission error
-    if (msg.includes('permission denied') || errorObj.code === '42501') {
+    if (errorMessage.includes('permission denied') || errorObj.code === '42501') {
       return 'Permission denied. Please try logging in again.';
     }
     
     // Connection error
-    if (msg.includes('Failed to fetch') || msg.includes('network')) {
+    if (errorMessage.includes('Failed to fetch') || errorMessage.includes('network')) {
       return 'Network error. Please check your connection and try again.';
     }
     
-    return msg;
+    return errorMessage;
   }
   
   // Edge function error
@@ -72,25 +107,34 @@ const parseSupabaseError = (error: unknown): string => {
   }
   
   return JSON.stringify(error);
-};
+}
+
+/**
+ * Sleep helper for retry delays.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, ms);
+  });
+}
 
 /**
  * Setup dev-only booking debug helpers
  */
-const setupBookingDevHelpers = (
+function setupBookingDevHelpers(
   getBookingPayload: () => Record<string, unknown> | null,
   lastError: { current: unknown }
-) => {
+): void {
   if (import.meta.env.DEV && typeof window !== 'undefined') {
     // Simulate booking payload (for debugging)
-    (window as unknown as Record<string, unknown>).__simulateBookingPayload = () => {
+    (window as unknown as Record<string, unknown>).__simulateBookingPayload = function() {
       const payload = getBookingPayload();
       console.log('[DEV] Current booking payload:', payload);
       return payload;
     };
 
     // Get last booking error
-    (window as unknown as Record<string, unknown>).__getLastBookingError = () => {
+    (window as unknown as Record<string, unknown>).__getLastBookingError = function() {
       console.log('[DEV] Last booking error:', lastError.current);
       return lastError.current;
     };
@@ -99,7 +143,7 @@ const setupBookingDevHelpers = (
     console.log('  - window.__simulateBookingPayload() - Show current booking payload');
     console.log('  - window.__getLastBookingError() - Show last booking error');
   }
-};
+}
 
 const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
   const { user, loading } = useAuth();
@@ -141,11 +185,24 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
   const [isPhoneValid, setIsPhoneValid] = useState(false);
 
   // Available coupons
-  const availableCoupons = {
+  const availableCoupons: Record<string, { discount: number; description: string }> = {
     'SL25': { discount: 25, description: '25% off on all tests' }
   };
 
   const { toast } = useToast();
+
+  const getTotalAmount = () => {
+    return cartItems.reduce((total, item) => total + item.customer_price, 0);
+  };
+
+  const getDiscountAmount = () => {
+    const total = getTotalAmount();
+    return (total * couponStatus.discount) / 100;
+  };
+
+  const getFinalAmount = () => {
+    return getTotalAmount() - getDiscountAmount();
+  };
 
   // Setup dev helpers
   useEffect(() => {
@@ -186,7 +243,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
   useEffect(() => {
     if (user) {
       // Check if email is a dummy/fake email from phone OTP authentication
-      // These have .local TLD or specific patterns like @phone.5thvital.local
       const isFakeEmail = (email: string | undefined): boolean => {
         if (!email) return true;
         return email.endsWith('.local') || email.includes('@phone.');
@@ -203,12 +259,10 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         // Pre-fill phone from user metadata or user.phone if available
         const userPhone = user.user_metadata?.phone || user.phone;
         if (userPhone && prev.customerPhone === '+91 ') {
-          // Format phone - ensure it has +91 prefix
           let formattedPhone = userPhone.trim();
           if (!formattedPhone.startsWith('+')) {
             formattedPhone = '+' + formattedPhone;
           }
-          // If it's just digits, add +91
           if (!formattedPhone.includes(' ') && formattedPhone.length >= 10) {
             const digits = formattedPhone.replace(/\D/g, '');
             if (digits.length === 10) {
@@ -217,13 +271,11 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
               formattedPhone = '+91 ' + digits.slice(2);
             }
           }
-          // Only update if we have a proper formatted phone
           if (formattedPhone.startsWith('+91') && formattedPhone.replace(/\D/g, '').length >= 12) {
             updates.customerPhone = formattedPhone.replace('+91', '+91 ');
           }
         }
         
-        // Only update if there are changes
         if (Object.keys(updates).length > 0) {
           return { ...prev, ...updates };
         }
@@ -242,18 +294,14 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
   ];
 
   const handleInputChange = (field: string, value: string) => {
-    // Format phone number as user types
     if (field === 'customerPhone') {
-      // Always ensure it starts with +91
       if (!value.startsWith('+91 ')) {
-        // If user tries to delete the prefix, restore it
         const digits = value.replace(/\D/g, '');
         if (digits.length === 0) {
           setBookingData(prev => ({ ...prev, [field]: '+91 ' }));
           setIsPhoneValid(false);
           return;
         }
-        // Extract just the phone number digits (remove country code if present)
         const phoneDigits = digits.startsWith('91') ? digits.slice(2) : digits;
         if (phoneDigits.length <= 10) {
           setBookingData(prev => ({ ...prev, [field]: `+91 ${phoneDigits}` }));
@@ -262,10 +310,8 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         return;
       }
       
-      // Remove all non-digits after the +91 prefix
       const digitsOnly = value.slice(4).replace(/\D/g, '');
       
-      // Limit to 10 digits and validate
       if (digitsOnly.length <= 10) {
         setBookingData(prev => ({ ...prev, [field]: `+91 ${digitsOnly}` }));
         setIsPhoneValid(digitsOnly.length === 10);
@@ -276,15 +322,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
     setBookingData(prev => ({ ...prev, [field]: value }));
   };
 
-  const getTotalAmount = () => {
-    return cartItems.reduce((total, item) => total + item.customer_price, 0);
-  };
-
-  const getDiscountAmount = () => {
-    const total = getTotalAmount();
-    return (total * couponStatus.discount) / 100;
-  };
-
   const applyCoupon = () => {
     const couponCode = bookingData.couponCode.toUpperCase().trim();
     
@@ -293,8 +330,8 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       return;
     }
 
-    if (availableCoupons[couponCode as keyof typeof availableCoupons]) {
-      const coupon = availableCoupons[couponCode as keyof typeof availableCoupons];
+    if (availableCoupons[couponCode]) {
+      const coupon = availableCoupons[couponCode];
       setCouponStatus({
         applied: true,
         message: `Coupon applied! ${coupon.description}`,
@@ -312,10 +349,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
     setBookingData(prev => ({ ...prev, couponCode: '', discountPercentage: 0 }));
   };
 
-  const getFinalAmount = () => {
-    return getTotalAmount() - getDiscountAmount();
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -323,7 +356,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       console.log('🟢 [Booking] Form submitted');
     }
     
-    // Clear any previous debug error
     setDebugError(null);
     lastErrorRef.current = null;
     
@@ -352,14 +384,13 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
 
     setIsSubmitting(true);
 
-    // Variables to track what succeeded
     let bookingCreated = false;
     let createdBookingId: string | null = null;
     let customBookingId: string | null = null;
     let bookingItemsCreated = false;
 
     try {
-      // Format phone number with +91 if no country code
+      // Format phone number
       let formattedPhone = bookingData.customerPhone.trim().replace(/\D/g, '');
       if (formattedPhone.length === 10) {
         formattedPhone = '+91' + formattedPhone;
@@ -371,11 +402,10 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         formattedPhone = bookingData.customerPhone;
       }
 
-      // Convert time range to start time (e.g., "09:00 AM - 11:00 AM" to "09:00")
-      let formattedTime = null;
+      // Convert time range to start time
+      let formattedTime: string | null = null;
       if (bookingData.preferredTime) {
         const startTime = bookingData.preferredTime.split(' - ')[0];
-        // Convert 12-hour format to 24-hour format
         const [time, period] = startTime.split(' ');
         const [hours, minutes] = time.split(':');
         let hour24 = parseInt(hours);
@@ -389,13 +419,13 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         formattedTime = `${hour24.toString().padStart(2, '0')}:${minutes}:00`;
       }
 
-      // STEP 1: Create booking (guest or authenticated user)
+      // STEP 1: Create booking with retry for network errors
       if (import.meta.env.DEV) {
         console.log('🟢 [Booking] Step 1: Creating booking in database...');
       }
       
       const bookingData_insert = {
-        user_id: user?.id || null,  // Allow null for guest bookings
+        user_id: user?.id || null,
         customer_name: bookingData.customerName,
         customer_phone: formattedPhone,
         customer_email: bookingData.customerEmail,
@@ -412,21 +442,48 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         notes: bookingData.notes || null
       };
 
-      const { data: booking, error: bookingError } = await supabase
-        .from('bookings')
-        .insert(bookingData_insert)
-        .select('*, custom_booking_id')
-        .single();
+      // Retry booking creation up to 3 times for network errors
+      let booking: { id: string; custom_booking_id: string | null } | null = null;
+      let lastBookingError: unknown = null;
+      
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { data, error: bookingError } = await supabase
+            .from('bookings')
+            .insert(bookingData_insert)
+            .select('id, custom_booking_id')
+            .single();
 
-      if (bookingError) {
-        if (import.meta.env.DEV) {
-          console.error('❌ [Booking] Step 1 FAILED - Booking creation error:', bookingError);
+          if (bookingError) {
+            lastBookingError = bookingError;
+            if (!isRetryableError(bookingError) || attempt === 3) {
+              throw bookingError;
+            }
+            if (import.meta.env.DEV) {
+              console.log(`⚠️ [Booking] Attempt ${attempt} failed, retrying...`, bookingError);
+            }
+            await sleep(1500 * attempt);
+            continue;
+          }
+          
+          booking = data;
+          break;
+        } catch (err) {
+          lastBookingError = err;
+          if (!isRetryableError(err) || attempt === 3) {
+            throw err;
+          }
+          if (import.meta.env.DEV) {
+            console.log(`⚠️ [Booking] Attempt ${attempt} error, retrying...`, err);
+          }
+          await sleep(1500 * attempt);
         }
-        lastErrorRef.current = bookingError;
-        throw bookingError;
+      }
+
+      if (!booking) {
+        throw lastBookingError || new Error('Failed to create booking');
       }
       
-      // Mark booking as created
       bookingCreated = true;
       createdBookingId = booking.id;
       customBookingId = booking.custom_booking_id;
@@ -435,13 +492,13 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         console.log('✅ [Booking] Step 1 SUCCESS - Booking created:', booking.id);
       }
 
-      // STEP 2: Create booking items
+      // STEP 2: Create booking items with retry
       if (import.meta.env.DEV) {
         console.log('🟢 [Booking] Step 2: Creating booking items...');
       }
       
       const bookingItems = cartItems.map(item => ({
-        booking_id: booking.id,
+        booking_id: booking!.id,
         item_type: 'test',
         item_id: item.id,
         item_name: item.test_name,
@@ -450,36 +507,57 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         total_price: item.customer_price
       }));
 
-      const { error: itemsError } = await supabase
-        .from('booking_items')
-        .insert(bookingItems);
-
-      if (itemsError) {
-        if (import.meta.env.DEV) {
-          console.error('❌ [Booking] Step 2 FAILED - Booking items error:', itemsError);
-          console.error('  Booking was created but items failed. Booking ID:', booking.id);
-        }
-        lastErrorRef.current = itemsError;
-        throw itemsError;
-      }
+      let lastItemsError: unknown = null;
       
-      // Mark booking items as created
-      bookingItemsCreated = true;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { error: itemsError } = await supabase
+            .from('booking_items')
+            .insert(bookingItems);
+
+          if (itemsError) {
+            lastItemsError = itemsError;
+            if (!isRetryableError(itemsError) || attempt === 3) {
+              throw itemsError;
+            }
+            if (import.meta.env.DEV) {
+              console.log(`⚠️ [Booking] Items attempt ${attempt} failed, retrying...`, itemsError);
+            }
+            await sleep(1500 * attempt);
+            continue;
+          }
+          
+          bookingItemsCreated = true;
+          break;
+        } catch (err) {
+          lastItemsError = err;
+          if (!isRetryableError(err) || attempt === 3) {
+            throw err;
+          }
+          if (import.meta.env.DEV) {
+            console.log(`⚠️ [Booking] Items attempt ${attempt} error, retrying...`, err);
+          }
+          await sleep(1500 * attempt);
+        }
+      }
+
+      if (!bookingItemsCreated) {
+        throw lastItemsError || new Error('Failed to create booking items');
+      }
       
       if (import.meta.env.DEV) {
         console.log('✅ [Booking] Step 2 SUCCESS - Booking items created:', bookingItems.length, 'items');
       }
 
-      // CRITICAL: Both booking AND booking_items succeeded - show success UI
+      // CRITICAL: Both succeeded - show success UI
       setIsSuccess(true);
       setBookingId(booking.custom_booking_id || booking.id);
       
-      // STEP 3: Send SMS notification (NON-BLOCKING - failures here do NOT fail the booking)
+      // STEP 3: Send SMS (NON-BLOCKING)
       if (import.meta.env.DEV) {
         console.log('🟢 [Booking] Step 3: Sending SMS notification (non-blocking)...');
       }
       
-      // Wrap SMS in its own try-catch to ensure it never throws
       try {
         const { data: smsResult, error: smsError } = await supabase.functions.invoke('send-booking-sms', {
           body: {
@@ -499,7 +577,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
           setSmsStatus({
             sent: false,
             error: smsError.message || 'SMS service error',
-            errorCode: (smsError as unknown as Record<string, string>).code,
+            errorCode: (smsError as Record<string, string>).code,
             formattedPhone: formattedPhone
           });
         } else if (smsResult?.success) {
@@ -522,8 +600,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
             formattedPhone: smsResult?.formattedPhone || formattedPhone
           });
         }
-      } catch (smsException: unknown) {
-        // SMS exception should NEVER bubble up to fail the booking
+      } catch (smsException) {
         if (import.meta.env.DEV) {
           console.warn('⚠️ [Booking] Step 3 - SMS exception (non-critical):', smsException);
         }
@@ -534,7 +611,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         });
       }
 
-      // Show success toast - booking is complete regardless of SMS status
       toast({
         title: "Booking Confirmed!",
         description: "Your booking has been successfully submitted. We'll contact you soon.",
@@ -545,7 +621,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       }
       
     } catch (error) {
-      // This catch only handles booking/booking_items errors, NOT SMS errors
       const errorMessage = parseSupabaseError(error);
       
       if (import.meta.env.DEV) {
@@ -561,7 +636,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       lastErrorRef.current = error;
       setDebugError(import.meta.env.DEV ? errorMessage : null);
       
-      // If booking was created but items failed, show partial success
       if (bookingCreated && !bookingItemsCreated) {
         toast({
           title: "Partial Booking Issue",
@@ -607,7 +681,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
           ...prev,
           sent: false,
           error: smsError.message,
-          errorCode: (smsError as unknown as Record<string, string>).code
+          errorCode: (smsError as Record<string, string>).code
         }));
       } else if (smsResult?.success) {
         if (import.meta.env.DEV) {
@@ -625,7 +699,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
           error: smsResult?.error || 'Unknown error'
         }));
       }
-    } catch (error: unknown) {
+    } catch (error) {
       if (import.meta.env.DEV) {
         console.error('❌ [Booking] SMS resend error:', error);
       }
@@ -646,7 +720,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
     });
   };
 
-  // Show loading state while checking authentication (optional for guests)
+  // Show loading state
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -797,7 +871,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                     try {
                       const { error } = await supabase.auth.signUp({
                         email: bookingData.customerEmail,
-                        password: Math.random().toString(36).slice(-8), // Temporary password
+                        password: Math.random().toString(36).slice(-8),
                         options: {
                           emailRedirectTo: `${window.location.origin}/`,
                           data: {
@@ -820,7 +894,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                         });
                         setShowAccountCreation(false);
                       }
-                    } catch (error: unknown) {
+                    } catch (error) {
                       toast({
                         title: "Error",
                         description: error instanceof Error ? error.message : "Failed to create account",
@@ -863,7 +937,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                   setIsSuccess(false);
                   setBookingData({
                     customerName: '',
-                    customerPhone: '',
+                    customerPhone: '+91 ',
                     customerEmail: '',
                     customerAge: '',
                     customerGender: '',
@@ -965,7 +1039,6 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                       value={bookingData.customerPhone}
                       onChange={(e) => handleInputChange('customerPhone', e.target.value)}
                       onFocus={(e) => {
-                        // Position cursor after +91 space if field only contains prefix
                         if (e.target.value === '+91 ') {
                           setTimeout(() => e.target.setSelectionRange(4, 4), 0);
                         }
@@ -1108,7 +1181,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                 </div>
 
                 <div className="lg:col-span-2">
-                  <Label htmlFor="address" className="text-sm font-medium text-gray-700 mb-2 block">Address</Label>
+                  <Label htmlFor="address" className="text-sm font-medium text-gray-700 mb-2 block">Address *</Label>
                   <Textarea
                     id="address"
                     value={bookingData.address}
@@ -1116,6 +1189,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                     placeholder="e.g., 123 MG Road, Bangalore, Karnataka - 560001"
                     className="min-h-[80px] bg-white border-gray-300 text-gray-900 placeholder-gray-400"
                     rows={3}
+                    required
                   />
                   <p className="text-xs text-gray-500 mt-1">Enter complete address for home sample collection</p>
                 </div>
