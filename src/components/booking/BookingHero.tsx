@@ -45,7 +45,7 @@ const BookingHero = () => {
             </Link>
 
             <div className="hidden md:flex items-center gap-2 lg:gap-4">
-              <Button variant="ghost" size="sm" onClick={() => scrollToSection('health-screening')} className="text-white hover:text-white hover:bg-white/10 font-medium">
+              <Button variant="ghost" size="sm" onClick={() => scrollToSection('packages')} className="text-white hover:text-white hover:bg-white/10 font-medium">
                 Book Health Screening Test
               </Button>
               <Button variant="ghost" size="sm" onClick={() => scrollToSection('book-tests')} className="text-white hover:text-white hover:bg-white/10 font-medium">
