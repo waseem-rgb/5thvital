@@ -48,7 +48,9 @@ export function usePackages(): UsePackagesResult {
       }
 
       if (!data || data.length === 0) {
-        console.log('[usePackages] No packages found');
+        if (import.meta.env.DEV) {
+          console.log('[usePackages] No packages found');
+        }
         setPackages([]);
         return;
       }
@@ -65,7 +67,9 @@ export function usePackages(): UsePackagesResult {
         return aOrder - bOrder;
       });
 
-      console.log('[usePackages] Loaded', sortedPackages.length, 'packages');
+      if (import.meta.env.DEV) {
+        console.log('[usePackages] Loaded', sortedPackages.length, 'packages');
+      }
       setPackages(sortedPackages as PackagePublic[]);
     } catch (err) {
       console.error('[usePackages] Unexpected error:', err);
@@ -130,7 +134,9 @@ export function usePackageBySlug(slug: string | undefined): {
         if (fetchError) {
           if (fetchError.code === 'PGRST116') {
             // No rows returned
-            console.log('[usePackageBySlug] Package not found:', slug);
+            if (import.meta.env.DEV) {
+              console.log('[usePackageBySlug] Package not found:', slug);
+            }
             setNotFound(true);
             setPackageData(null);
           } else {
@@ -147,7 +153,9 @@ export function usePackageBySlug(slug: string | undefined): {
           return;
         }
 
-        console.log('[usePackageBySlug] Loaded package:', data.title);
+        if (import.meta.env.DEV) {
+          console.log('[usePackageBySlug] Loaded package:', data.title);
+        }
         setPackageData(data as PackagePublic);
       } catch (err) {
         console.error('[usePackageBySlug] Unexpected error:', err);
