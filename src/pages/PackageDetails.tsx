@@ -28,9 +28,12 @@ import {
   ClipboardList,
   HelpCircle,
   Info,
+  Check,
 } from 'lucide-react';
 import { useState } from 'react';
 import type { ParameterCategory } from '@/types/package';
+import { addPackageToCart } from '@/lib/cart';
+import { toast } from '@/hooks/use-toast';
 
 /**
  * PackageDetails - Displays a single package from public.packages table.
@@ -45,6 +48,7 @@ import type { ParameterCategory } from '@/types/package';
  *   - Hero section with title, pricing, CTA
  *   - Stat tiles row
  *   - Tab-based content: About, Parameters, Preparation, Why This Test, FAQs
+ * - Add to Cart functionality that writes to localStorage and redirects to home
  */
 
 /**
@@ -146,6 +150,55 @@ const PackageDetails = () => {
   const navigate = useNavigate();
   const { package_data, loading, error, notFound } = usePackageBySlug(slug);
   const [activeTab, setActiveTab] = useState('about');
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
+
+  /**
+   * Handle adding package to cart
+   * - Adds to localStorage cart
+   * - Shows toast notification
+   * - Navigates to home page with cart section
+   */
+  const handleAddToCart = () => {
+    if (!package_data) return;
+    
+    setIsAddingToCart(true);
+    
+    try {
+      const wasAdded = addPackageToCart({
+        id: package_data.id,
+        title: package_data.title,
+        slug: package_data.slug,
+        price: package_data.price,
+        tests_included: package_data.tests_included,
+      });
+      
+      if (wasAdded) {
+        toast({
+          title: "Added to Cart",
+          description: `${package_data.title} has been added to your cart.`,
+        });
+      } else {
+        toast({
+          title: "Already in Cart",
+          description: `${package_data.title} is already in your cart.`,
+        });
+      }
+      
+      // Navigate to home page - the cart section will auto-expand due to cart items
+      setTimeout(() => {
+        navigate('/');
+      }, 500);
+    } catch (err) {
+      console.error('[PackageDetails] Error adding to cart:', err);
+      toast({
+        title: "Error",
+        description: "Failed to add package to cart. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAddingToCart(false);
+    }
+  };
 
   // Loading state
   if (loading) {
@@ -310,12 +363,22 @@ const PackageDetails = () => {
 
             {/* CTA Button */}
             <Button
-              onClick={() => navigate('/')}
+              onClick={handleAddToCart}
+              disabled={isAddingToCart}
               size="lg"
               className="w-full sm:w-auto"
             >
-              <ShoppingCart className="w-4 h-4 mr-2" />
-              Add to Cart
+              {isAddingToCart ? (
+                <>
+                  <Check className="w-4 h-4 mr-2 animate-pulse" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="w-4 h-4 mr-2" />
+                  Add to Cart
+                </>
+              )}
             </Button>
           </div>
 
@@ -599,12 +662,22 @@ const PackageDetails = () => {
           <div className="sticky bottom-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t py-4 -mx-4 px-4 sm:-mx-6 sm:px-6">
             <div className="flex flex-col sm:flex-row gap-3 max-w-4xl mx-auto">
               <Button
-                onClick={() => navigate('/')}
+                onClick={handleAddToCart}
+                disabled={isAddingToCart}
                 className="flex-1"
                 size="lg"
               >
-                <ShoppingCart className="w-4 h-4 mr-2" />
-                Book This Package — {hasPrice ? formatPrice(package_data.price) : 'View Price'}
+                {isAddingToCart ? (
+                  <>
+                    <Check className="w-4 h-4 mr-2 animate-pulse" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <ShoppingCart className="w-4 h-4 mr-2" />
+                    Book This Package — {hasPrice ? formatPrice(package_data.price) : 'View Price'}
+                  </>
+                )}
               </Button>
               <Button
                 onClick={() => navigate('/')}
