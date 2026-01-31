@@ -300,6 +300,17 @@ export type Database = {
           status: string
           is_featured: boolean
           sort_order: number | null
+          mrp: number | null
+          price: number | null
+          discount_percent: number | null
+          reports_within_hours: number | null
+          tests_included: number | null
+          requisites: string | null
+          home_collection_minutes: number | null
+          highlights: string | null
+          description: string | null
+          parameters: Json | null
+          faqs: Json | null
         }
         Insert: {
           id?: string
@@ -308,6 +319,17 @@ export type Database = {
           status?: string
           is_featured?: boolean
           sort_order?: number | null
+          mrp?: number | null
+          price?: number | null
+          discount_percent?: number | null
+          reports_within_hours?: number | null
+          tests_included?: number | null
+          requisites?: string | null
+          home_collection_minutes?: number | null
+          highlights?: string | null
+          description?: string | null
+          parameters?: Json | null
+          faqs?: Json | null
         }
         Update: {
           id?: string
@@ -316,6 +338,17 @@ export type Database = {
           status?: string
           is_featured?: boolean
           sort_order?: number | null
+          mrp?: number | null
+          price?: number | null
+          discount_percent?: number | null
+          reports_within_hours?: number | null
+          tests_included?: number | null
+          requisites?: string | null
+          home_collection_minutes?: number | null
+          highlights?: string | null
+          description?: string | null
+          parameters?: Json | null
+          faqs?: Json | null
         }
         Relationships: []
       }

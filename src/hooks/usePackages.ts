@@ -1,24 +1,48 @@
 import { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
-import type { PackagePublic } from '@/types/package';
+import type { PackagePublic, PackageListItem, ParameterCategory, FAQ } from '@/types/package';
 
 interface UsePackagesResult {
-  packages: PackagePublic[];
+  packages: PackageListItem[];
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
 }
 
 /**
+ * Columns selected for package listing (cards/previews)
+ */
+const LIST_COLUMNS = `
+  id, slug, title, status, is_featured, sort_order,
+  mrp, price, discount_percent, tests_included
+`;
+
+/**
+ * Columns selected for single package detail view
+ */
+const DETAIL_COLUMNS = `
+  id, slug, title, status, is_featured, sort_order,
+  mrp, price, discount_percent,
+  reports_within_hours, tests_included, requisites, home_collection_minutes,
+  highlights, description, parameters, faqs
+`;
+
+/**
  * Fetch all published packages from public.packages table.
- * - Filters: status = 'published'
- * - Order: sort_order asc (nulls last)
- * - Featured packages are sorted first client-side
+ * 
+ * Query:
+ *   SELECT ... FROM packages
+ *   WHERE status = 'published'
+ *   ORDER BY is_featured DESC, sort_order ASC
+ * 
+ * - Featured packages appear first (is_featured DESC)
+ * - Then sorted by sort_order (ASC, nulls last)
+ * - No limit: shows all published packages
  * 
  * READ-ONLY: No inserts/updates/deletes
  */
 export function usePackages(): UsePackagesResult {
-  const [packages, setPackages] = useState<PackagePublic[]>([]);
+  const [packages, setPackages] = useState<PackageListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,10 +58,12 @@ export function usePackages(): UsePackagesResult {
     setError(null);
 
     try {
+      // Database-level ordering: is_featured DESC, sort_order ASC
       const { data, error: fetchError } = await supabase
         .from('packages')
-        .select('id, slug, title, status, is_featured, sort_order')
+        .select(LIST_COLUMNS)
         .eq('status', 'published')
+        .order('is_featured', { ascending: false })
         .order('sort_order', { ascending: true, nullsFirst: false });
 
       if (fetchError) {
@@ -55,22 +81,12 @@ export function usePackages(): UsePackagesResult {
         return;
       }
 
-      // Sort: featured first, then by sort_order
-      const sortedPackages = [...data].sort((a, b) => {
-        // Featured packages come first
-        if (a.is_featured && !b.is_featured) return -1;
-        if (!a.is_featured && b.is_featured) return 1;
-        
-        // Then by sort_order (nulls last)
-        const aOrder = a.sort_order ?? Number.MAX_SAFE_INTEGER;
-        const bOrder = b.sort_order ?? Number.MAX_SAFE_INTEGER;
-        return aOrder - bOrder;
-      });
-
       if (import.meta.env.DEV) {
-        console.log('[usePackages] Loaded', sortedPackages.length, 'packages');
+        console.log('[usePackages] Loaded', data.length, 'packages');
       }
-      setPackages(sortedPackages as PackagePublic[]);
+      
+      // Data is already sorted by DB: is_featured DESC, sort_order ASC
+      setPackages(data as unknown as PackageListItem[]);
     } catch (err) {
       console.error('[usePackages] Unexpected error:', err);
       setError('Unexpected error loading packages');
@@ -88,8 +104,32 @@ export function usePackages(): UsePackagesResult {
 }
 
 /**
+ * Parse JSON field safely to typed array
+ */
+function parseJsonArray<T>(data: unknown): T[] | null {
+  if (!data) return null;
+  if (Array.isArray(data)) return data as T[];
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
  * Fetch a single package by slug from public.packages table.
- * - Filters: status = 'published' AND slug = provided slug
+ * 
+ * Query:
+ *   SELECT ... FROM packages
+ *   WHERE slug = :slug AND status = 'published'
+ *   LIMIT 1
+ * 
+ * - Returns full package data including parameters and FAQs
+ * - Returns notFound if package doesn't exist or isn't published
  * 
  * READ-ONLY: No inserts/updates/deletes
  */
@@ -126,7 +166,7 @@ export function usePackageBySlug(slug: string | undefined): {
       try {
         const { data, error: fetchError } = await supabase
           .from('packages')
-          .select('id, slug, title, status, is_featured, sort_order')
+          .select(DETAIL_COLUMNS)
           .eq('slug', slug)
           .eq('status', 'published')
           .single();
@@ -153,10 +193,31 @@ export function usePackageBySlug(slug: string | undefined): {
           return;
         }
 
+        // Convert database row to typed PackagePublic
+        const typedPackage: PackagePublic = {
+          id: data.id,
+          slug: data.slug,
+          title: data.title,
+          status: data.status,
+          is_featured: data.is_featured,
+          sort_order: data.sort_order,
+          mrp: data.mrp,
+          price: data.price,
+          discount_percent: data.discount_percent,
+          reports_within_hours: data.reports_within_hours,
+          tests_included: data.tests_included,
+          requisites: data.requisites,
+          home_collection_minutes: data.home_collection_minutes,
+          highlights: data.highlights,
+          description: data.description,
+          parameters: parseJsonArray<ParameterCategory>(data.parameters),
+          faqs: parseJsonArray<FAQ>(data.faqs),
+        };
+
         if (import.meta.env.DEV) {
-          console.log('[usePackageBySlug] Loaded package:', data.title);
+          console.log('[usePackageBySlug] Loaded package:', typedPackage.title);
         }
-        setPackageData(data as PackagePublic);
+        setPackageData(typedPackage);
       } catch (err) {
         console.error('[usePackageBySlug] Unexpected error:', err);
         setError('Unexpected error loading package');
