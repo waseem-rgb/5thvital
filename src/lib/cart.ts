@@ -14,6 +14,10 @@ export interface CartItem {
   test_code: string;
   body_system: string;
   customer_price: number;
+  /** Original UUID for database insertion (without prefixes like 'pkg_') */
+  original_id?: string;
+  /** Item type: 'test' for individual tests, 'package' for health packages */
+  item_type?: 'test' | 'package';
 }
 
 /**
@@ -95,11 +99,13 @@ export function addPackageToCart(pkg: {
   tests_included?: number | null;
 }): boolean {
   const cartItem: CartItem = {
-    id: `pkg_${pkg.id}`, // Prefix with 'pkg_' to distinguish from individual tests
+    id: `pkg_${pkg.id}`, // Prefix with 'pkg_' to distinguish from individual tests in UI
     test_name: pkg.title,
     test_code: pkg.slug.toUpperCase().replace(/-/g, '_'),
     body_system: 'Health Package',
     customer_price: pkg.price ?? 0,
+    original_id: pkg.id, // Store the raw UUID for database insertion
+    item_type: 'package', // Mark as package for booking_items
   };
   
   return addToCart(cartItem);

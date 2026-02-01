@@ -20,6 +20,10 @@ interface TestItem {
   test_code: string;
   body_system: string;
   customer_price: number;
+  /** Original UUID for database insertion (without prefixes like 'pkg_') */
+  original_id?: string;
+  /** Item type: 'test' for individual tests, 'package' for health packages */
+  item_type?: 'test' | 'package';
 }
 
 /**

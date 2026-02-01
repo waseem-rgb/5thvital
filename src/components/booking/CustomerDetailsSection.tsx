@@ -23,6 +23,10 @@ interface TestItem {
   test_code: string;
   body_system: string;
   customer_price: number;
+  /** Original UUID for database insertion (without prefixes like 'pkg_') */
+  original_id?: string;
+  /** Item type: 'test' for individual tests, 'package' for health packages */
+  item_type?: 'test' | 'package';
 }
 
 interface CustomerDetailsSectionProps {
@@ -497,15 +501,37 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         console.log('🟢 [Booking] Step 2: Creating booking items...');
       }
       
+      // Helper to extract UUID from cart item ID
+      // - If original_id is set (packages), use it directly
+      // - If id starts with 'pkg_', strip the prefix to get the UUID
+      // - Otherwise, use id as-is (regular tests should have valid UUIDs)
+      const getItemUuid = (item: TestItem): string => {
+        if (item.original_id) {
+          return item.original_id;
+        }
+        if (item.id.startsWith('pkg_')) {
+          return item.id.slice(4); // Remove 'pkg_' prefix
+        }
+        return item.id;
+      };
+      
       const bookingItems = cartItems.map(item => ({
         booking_id: booking!.id,
-        item_type: 'test',
-        item_id: item.id,
+        // Note: DB constraint only allows 'test' or 'profile', using 'test' for packages too
+        item_type: 'test' as const,
+        item_id: getItemUuid(item),
         item_name: item.test_name,
         quantity: 1,
         unit_price: item.customer_price,
         total_price: item.customer_price
       }));
+      
+      if (import.meta.env.DEV) {
+        console.log('🟢 [Booking] Booking items to insert:', bookingItems.map(bi => ({
+          item_id: bi.item_id,
+          item_name: bi.item_name
+        })));
+      }
 
       let lastItemsError: unknown = null;
       
