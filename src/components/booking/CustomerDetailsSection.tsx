@@ -31,6 +31,7 @@ interface TestItem {
 
 interface CustomerDetailsSectionProps {
   cartItems: TestItem[];
+  onBookingSuccess?: () => void;
 }
 
 /**
@@ -149,7 +150,7 @@ function setupBookingDevHelpers(
   }
 }
 
-const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
+const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetailsSectionProps) => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -337,7 +338,9 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
     setIsCouponLoading(true);
     try {
       // Call Supabase validate_coupon RPC directly (no admin panel dependency)
-      const { data, error } = await supabase.rpc('validate_coupon', {
+      // Using 'as any' because validate_coupon is created via migration, not in generated types
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any).rpc('validate_coupon', {
         p_code: couponCode,
         p_subtotal: getTotalAmount(),
       });
@@ -564,15 +567,13 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
         total_price: item.customer_price
       }));
       
-      if (import.meta.env.DEV) {
-        console.log('🟢 [Booking] Booking items to insert:', bookingItems.map(bi => ({
-          item_id: bi.item_id,
-          item_name: bi.item_name
-        })));
-      }
+      // Log in both dev AND production for diagnosing insert failures
+      console.log('[Booking] Items to insert:', JSON.stringify(bookingItems.map(bi => ({
+        item_id: bi.item_id, item_type: bi.item_type, item_name: bi.item_name
+      }))));
 
       let lastItemsError: unknown = null;
-      
+
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const { error: itemsError } = await supabase
@@ -580,26 +581,23 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
             .insert(bookingItems);
 
           if (itemsError) {
+            // Always log booking_items errors (even in production)
+            console.error(`[Booking] booking_items insert attempt ${attempt} failed:`, JSON.stringify(itemsError));
             lastItemsError = itemsError;
             if (!isRetryableError(itemsError) || attempt === 3) {
               throw itemsError;
             }
-            if (import.meta.env.DEV) {
-              console.log(`⚠️ [Booking] Items attempt ${attempt} failed, retrying...`, itemsError);
-            }
             await sleep(1500 * attempt);
             continue;
           }
-          
+
           bookingItemsCreated = true;
           break;
         } catch (err) {
+          console.error(`[Booking] booking_items insert attempt ${attempt} error:`, err);
           lastItemsError = err;
           if (!isRetryableError(err) || attempt === 3) {
             throw err;
-          }
-          if (import.meta.env.DEV) {
-            console.log(`⚠️ [Booking] Items attempt ${attempt} error, retrying...`, err);
           }
           await sleep(1500 * attempt);
         }
@@ -616,6 +614,9 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       // CRITICAL: Both succeeded - show success UI
       setIsSuccess(true);
       setBookingId(booking.custom_booking_id || booking.id);
+
+      // Clear cart from localStorage after successful booking
+      onBookingSuccess?.();
 
       // Increment coupon usage count (non-blocking)
       if (couponStatus.applied && bookingData.couponCode) {
@@ -652,6 +653,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
             scheduledTime: bookingData.preferredTime,
             testNames: cartItems.map(item => item.test_name),
             address: bookingData.address || undefined,
+            couponCode: couponStatus.applied ? bookingData.couponCode : undefined,
           }
         });
         

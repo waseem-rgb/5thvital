@@ -175,7 +175,7 @@ const PackageDetails = () => {
       if (wasAdded) {
         toast({
           title: "Added to Cart",
-          description: `${package_data.title} has been added to your cart.`,
+          description: `${package_data.title} added! Continue browsing or proceed to checkout.`,
         });
       } else {
         toast({
@@ -183,11 +183,6 @@ const PackageDetails = () => {
           description: `${package_data.title} is already in your cart.`,
         });
       }
-      
-      // Navigate to home page - the cart section will auto-expand due to cart items
-      setTimeout(() => {
-        navigate('/');
-      }, 500);
     } catch (err) {
       console.error('[PackageDetails] Error adding to cart:', err);
       toast({

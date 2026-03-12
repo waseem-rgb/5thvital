@@ -8,11 +8,8 @@ import MobileAuthModal from '@/components/auth/MobileAuthModal';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { ShoppingCart } from 'lucide-react';
 
-/**
- * Local storage key for cart persistence.
- * Cart data persists across page refreshes, auth state changes, and navigation.
- */
 const CART_STORAGE_KEY = 'bookingCart';
 
 interface TestItem {
@@ -21,37 +18,20 @@ interface TestItem {
   test_code: string;
   body_system: string;
   customer_price: number;
-  /** Original UUID for database insertion (without prefixes like 'pkg_') */
   original_id?: string;
-  /** Item type: 'test' for individual tests, 'package' for health packages */
   item_type?: 'test' | 'package';
 }
 
-/**
- * Safely load cart from localStorage with error handling.
- * Returns empty array if storage is unavailable or data is corrupted.
- */
 const loadCartFromStorage = (): TestItem[] => {
   try {
     const savedCart = localStorage.getItem(CART_STORAGE_KEY);
-    if (!savedCart) {
-      if (import.meta.env.DEV) {
-        console.log('[Cart] No saved cart found in localStorage');
-      }
-      return [];
-    }
-    
+    if (!savedCart) return [];
     const parsed = JSON.parse(savedCart);
-    
-    // Validate cart structure
     if (!Array.isArray(parsed)) {
-      console.warn('[Cart] Invalid cart data (not array), resetting');
       localStorage.removeItem(CART_STORAGE_KEY);
       return [];
     }
-    
-    // Filter out invalid items
-    const validItems = parsed.filter((item: unknown): item is TestItem => {
+    return parsed.filter((item: unknown): item is TestItem => {
       if (!item || typeof item !== 'object') return false;
       const obj = item as Record<string, unknown>;
       return (
@@ -60,133 +40,48 @@ const loadCartFromStorage = (): TestItem[] => {
         typeof obj.customer_price === 'number'
       );
     });
-    
-    if (import.meta.env.DEV) {
-      console.log(`[Cart] Loaded ${validItems.length} items from localStorage`, validItems.map(i => i.test_name));
-    }
-    
-    return validItems;
-  } catch (error) {
-    console.error('[Cart] Error loading cart from localStorage:', error);
+  } catch {
     return [];
   }
 };
 
-/**
- * Safely save cart to localStorage.
- */
 const saveCartToStorage = (items: TestItem[]): void => {
   try {
     localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
-    if (import.meta.env.DEV) {
-      console.log(`[Cart] Saved ${items.length} items to localStorage`);
-    }
   } catch (error) {
-    console.error('[Cart] Error saving cart to localStorage:', error);
-  }
-};
-
-/**
- * Setup dev-only window helpers for debugging cart state.
- */
-const setupDevHelpers = (
-  getCartItems: () => TestItem[],
-  setCartItems: React.Dispatch<React.SetStateAction<TestItem[]>>
-) => {
-  if (import.meta.env.DEV && typeof window !== 'undefined') {
-    // Dump current cart state
-    (window as unknown as Record<string, unknown>).__dumpCart = () => {
-      const items = getCartItems();
-      console.log('[DEV] Current cart state:', {
-        itemCount: items.length,
-        totalAmount: items.reduce((sum, item) => sum + item.customer_price, 0),
-        items: items.map(i => ({ id: i.id, name: i.test_name, price: i.customer_price })),
-        localStorageRaw: localStorage.getItem(CART_STORAGE_KEY)
-      });
-      return items;
-    };
-
-    // Force reload cart from localStorage
-    (window as unknown as Record<string, unknown>).__reloadCart = () => {
-      const loaded = loadCartFromStorage();
-      setCartItems(loaded);
-      console.log('[DEV] Cart reloaded from localStorage:', loaded.length, 'items');
-      return loaded;
-    };
-
-    // Clear cart (for testing)
-    (window as unknown as Record<string, unknown>).__clearCart = () => {
-      setCartItems([]);
-      localStorage.removeItem(CART_STORAGE_KEY);
-      console.log('[DEV] Cart cleared');
-    };
-
-    console.log('[DEV] Cart debug helpers available:');
-    console.log('  - window.__dumpCart() - Show current cart state');
-    console.log('  - window.__reloadCart() - Reload cart from localStorage');
-    console.log('  - window.__clearCart() - Clear cart completely');
+    console.error('[Cart] Error saving cart:', error);
   }
 };
 
 const Booking = () => {
   const { user, loading: authLoading } = useAuth();
   const [cartItems, setCartItems] = useState<TestItem[]>(() => loadCartFromStorage());
-  const [hasProceededToBook, setHasProceededToBook] = useState(false);
   const [accordionValue, setAccordionValue] = useState<string[]>([]);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [pendingCheckout, setPendingCheckout] = useState(false);
-  const heroRef = useRef<HTMLDivElement>(null);
   const cartRef = useRef<HTMLDivElement>(null);
   const detailsRef = useRef<HTMLDivElement>(null);
-  
-  // Track previous user state to detect auth transitions
   const prevUserRef = useRef<typeof user>(null);
-
-  // Memoized getter for dev helpers
-  const getCartItems = useCallback(() => cartItems, [cartItems]);
-
-  // Setup dev helpers on mount
-  useEffect(() => {
-    setupDevHelpers(getCartItems, setCartItems);
-  }, [getCartItems]);
 
   // Save cart to localStorage whenever it changes
   useEffect(() => {
     saveCartToStorage(cartItems);
   }, [cartItems]);
 
-  // Handle auth state transitions - ensure cart persists
+  // Handle auth state transitions — preserve cart + auto-advance if pending checkout
   useEffect(() => {
     const prevUser = prevUserRef.current;
-    
-    if (import.meta.env.DEV) {
-      console.log('[Cart] Auth state check:', {
-        prevUser: prevUser?.id?.slice(0, 8) || 'none',
-        currentUser: user?.id?.slice(0, 8) || 'none',
-        authLoading,
-        cartItemCount: cartItems.length
-      });
-    }
 
-    // Detect transition from logged-out to logged-in
     if (!prevUser && user && !authLoading) {
-      if (import.meta.env.DEV) {
-        console.log('[Cart] User logged in - verifying cart persistence');
-      }
-
-      // Cart should already be in state from localStorage
-      // Double-check and reload if state got cleared somehow
+      // Just logged in — restore cart if state got cleared
       if (cartItems.length === 0) {
         const storedCart = loadCartFromStorage();
         if (storedCart.length > 0) {
-          if (import.meta.env.DEV) {
-            console.log('[Cart] Restoring cart after login:', storedCart.length, 'items');
-          }
           setCartItems(storedCart);
         }
       }
 
-      // If user just logged in after clicking "Continue to Details", auto-advance
+      // Auto-advance to details if user was trying to checkout
       if (pendingCheckout) {
         setPendingCheckout(false);
         setAccordionValue(['cart', 'details']);
@@ -197,97 +92,85 @@ const Booking = () => {
     }
 
     prevUserRef.current = user;
-  }, [user, authLoading, cartItems.length]);
-
-  // Auto-expand accordion sections when tests are added
-  useEffect(() => {
-    if (cartItems.length > 0) {
-      setAccordionValue(['cart', 'details']);
-    } else {
-      setAccordionValue([]);
-    }
-  }, [cartItems.length]);
+  }, [user, authLoading, cartItems.length, pendingCheckout]);
 
   const handleAddToCart = useCallback((test: TestItem) => {
     setCartItems(prev => {
       const exists = prev.find(item => item.id === test.id);
       if (!exists) {
-        const newCart = [...prev, test];
-        if (import.meta.env.DEV) {
-          console.log('[Cart] Added:', test.test_name, '| Total items:', newCart.length);
-        }
-        return newCart;
-      }
-      if (import.meta.env.DEV) {
-        console.log('[Cart] Item already in cart:', test.test_name);
+        return [...prev, test];
       }
       return prev;
     });
+    // DO NOT scroll or expand accordion — keep user at search
   }, []);
 
   const handleRemoveFromCart = useCallback((testId: string) => {
-    setCartItems(prev => {
-      const item = prev.find(i => i.id === testId);
-      const newCart = prev.filter(item => item.id !== testId);
-      if (import.meta.env.DEV) {
-        console.log('[Cart] Removed:', item?.test_name || testId, '| Remaining:', newCart.length);
-      }
-      return newCart;
-    });
+    setCartItems(prev => prev.filter(item => item.id !== testId));
   }, []);
-
-  const handleProceedToBook = useCallback(() => {
-    if (import.meta.env.DEV) {
-      console.log('[Cart] Proceeding to book with', cartItems.length, 'items');
-    }
-    setHasProceededToBook(true);
-    cartRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [cartItems.length]);
 
   const handleContinueToDetails = useCallback(() => {
     if (!user) {
-      // Guest user — require login before checkout
+      // Guest — show login modal, preserve cart
       setPendingCheckout(true);
       setShowAuthModal(true);
       return;
     }
-    detailsRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Logged in — show details section
+    setAccordionValue(['cart', 'details']);
+    setTimeout(() => {
+      detailsRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
   }, [user]);
+
+  // Scroll to cart section
+  const handleGoToCart = useCallback(() => {
+    setAccordionValue(['cart']);
+    setTimeout(() => {
+      cartRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  }, []);
+
+  // Clear cart after successful booking
+  const handleBookingSuccess = useCallback(() => {
+    setCartItems([]);
+    localStorage.removeItem(CART_STORAGE_KEY);
+  }, []);
+
+  const cartTotal = cartItems.reduce((sum, item) => sum + item.customer_price, 0);
 
   return (
     <div className="min-h-screen">
       <MobileAuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
       <div>
-        {/* 1. Hero Section - Video, Nav, Tagline Only */}
-        <div ref={heroRef}>
-          <BookingHero />
-        </div>
+        {/* Hero Section */}
+        <BookingHero />
 
-        {/* 2. Health Screening Packages Section (DB-driven from public.packages) */}
+        {/* Health Screening Packages (DB-driven) */}
         <PackagesSection />
 
-        {/* 3. Search Tests Section */}
+        {/* Search Tests Section — user stays here after adding */}
         <SearchTestsSection onAddToCart={handleAddToCart} />
 
-        {/* 5. Prescription Upload Section */}
+        {/* Prescription Upload */}
         <PrescriptionUploadSection />
 
-        {/* 6. Cart and Customer Details - Only visible when cart has items */}
+        {/* Cart + Customer Details — visible when cart has items */}
         {cartItems.length > 0 && (
-          <Accordion 
-            type="multiple" 
-            value={accordionValue} 
+          <Accordion
+            type="multiple"
+            value={accordionValue}
             onValueChange={setAccordionValue}
             className="w-full"
           >
             <AccordionItem value="cart" className="border-none">
               <AccordionTrigger className="text-2xl sm:text-4xl font-bold text-center py-8 hover:no-underline data-[state=closed]:text-muted-foreground data-[state=open]:text-foreground justify-center">
-                Review Your Tests
+                Review Your Tests ({cartItems.length})
               </AccordionTrigger>
               <AccordionContent className="pb-0 animate-accordion-down">
                 <div ref={cartRef} data-cart className="animate-fade-in">
                   <CartSection
-                    cartItems={cartItems} 
+                    cartItems={cartItems}
                     onRemoveFromCart={handleRemoveFromCart}
                     onContinueToDetails={handleContinueToDetails}
                   />
@@ -301,8 +184,9 @@ const Booking = () => {
               </AccordionTrigger>
               <AccordionContent className="pb-0 animate-accordion-down">
                 <div ref={detailsRef} className="animate-fade-in">
-                  <CustomerDetailsSection 
+                  <CustomerDetailsSection
                     cartItems={cartItems}
+                    onBookingSuccess={handleBookingSuccess}
                   />
                 </div>
               </AccordionContent>
@@ -310,6 +194,39 @@ const Booking = () => {
           </Accordion>
         )}
       </div>
+
+      {/* Floating Cart Bar — always visible when cart has items */}
+      {cartItems.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-foreground text-background border-t shadow-2xl safe-area-bottom">
+          <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4">
+            <button
+              onClick={handleGoToCart}
+              className="flex items-center gap-3 flex-1 min-w-0"
+            >
+              <div className="relative">
+                <ShoppingCart className="h-6 w-6" />
+                <span className="absolute -top-2 -right-2 bg-green-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
+                  {cartItems.length}
+                </span>
+              </div>
+              <div className="text-left min-w-0">
+                <p className="text-sm font-semibold truncate">
+                  {cartItems.length} {cartItems.length === 1 ? 'item' : 'items'} in cart
+                </p>
+                <p className="text-xs opacity-80">
+                  Total: ₹{cartTotal.toLocaleString()}
+                </p>
+              </div>
+            </button>
+            <button
+              onClick={handleContinueToDetails}
+              className="bg-green-500 hover:bg-green-600 text-white font-bold px-6 py-2.5 rounded-xl text-sm transition-colors whitespace-nowrap"
+            >
+              Checkout →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

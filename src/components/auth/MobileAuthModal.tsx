@@ -222,8 +222,13 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
       <DialogContent className="sm:max-w-md bg-white border-2 border-border text-foreground">
         <DialogHeader>
           <DialogTitle className="text-center text-2xl font-bold text-foreground mb-2">
-            {step === 'phone' ? 'Login with Phone' : 'Verify OTP'}
+            {step === 'phone' ? 'Login to Complete Booking' : 'Verify OTP'}
           </DialogTitle>
+          {step === 'phone' && (
+            <p className="text-center text-sm text-muted-foreground mt-1">
+              Your cart is saved. Login to complete your booking.
+            </p>
+          )}
         </DialogHeader>
         
         <div className="space-y-6 py-4">

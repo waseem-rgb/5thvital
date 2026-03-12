@@ -15,6 +15,7 @@ interface SMSRequest {
   scheduledDate?: string;
   testNames?: string[];
   address?: string;
+  couponCode?: string;
 }
 
 function formatPhoneE164India(input: string): string {
@@ -124,8 +125,8 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate, testNames, address }: SMSRequest = await req.json();
-    console.log('SMS request data:', { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate, testNames, address });
+    const { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate, testNames, address, couponCode }: SMSRequest = await req.json();
+    console.log('SMS request data:', { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate, testNames, address, couponCode });
 
     const twilioAccountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
     const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN');
@@ -162,16 +163,11 @@ const handler = async (req: Request): Promise<Response> => {
       ? `\nTests: ${testNames.join(', ')}`
       : '';
     const addressLine = address ? `\nAddress: ${address}` : '';
+    const dateLine = scheduledDate && scheduledTime
+      ? `\nDate: ${scheduledDate} at ${scheduledTime}`
+      : `\nWe'll contact you to schedule home sample collection (6am-11am).`;
 
-    let messageBody = `Hi ${customerName}! Your booking is confirmed.\nID: ${bookingId}\nTotal: ₹${totalAmount.toLocaleString()}${testsLine}`;
-
-    if (scheduledDate && scheduledTime) {
-      messageBody += `\nCollection: ${scheduledDate} at ${scheduledTime}`;
-    } else {
-      messageBody += `\nWe'll contact you to schedule home sample collection (6am-11am).`;
-    }
-
-    messageBody += `${addressLine}\nHelpline: ${helplineNumber}\n- 5thVital`;
+    const messageBody = `Hi ${customerName}! ✅ Booking confirmed at 5thVital.\nID: ${bookingId}${testsLine}${dateLine}${addressLine}\nAmount: ₹${totalAmount.toLocaleString()} (Cash on Collection)\nTrack: https://5thvital.com/dashboard\nHelpline: ${helplineNumber}`;
 
     console.log('Sending SMS to customer:', formattedPhone);
 
@@ -215,13 +211,14 @@ const handler = async (req: Request): Promise<Response> => {
 
     // Admin alert message — compact, scannable format
     const slotInfo = scheduledDate && scheduledTime
-      ? `Slot: ${scheduledDate} ${scheduledTime}`
-      : 'Schedule pending';
+      ? `\nSlot: ${scheduledDate} ${scheduledTime}`
+      : '\nSchedule: pending';
     const testsInfo = testNames && testNames.length > 0
       ? `\nTests: ${testNames.join(', ')}`
       : '';
-    const addrInfo = address ? `\nAddr: ${address}` : '';
-    const adminMessageBody = `🔔 New Booking | ${customerName} | ${slotInfo} | ₹${totalAmount.toLocaleString()} | Ph: ${formattedPhone} | ID: ${bookingId}${testsInfo}${addrInfo}`;
+    const addrInfo = address ? `\nAddress: ${address}` : '';
+    const couponInfo = couponCode ? `\nCoupon: ${couponCode}` : '\nCoupon: None';
+    const adminMessageBody = `🔔 NEW BOOKING ${bookingId}\nCustomer: ${customerName} | ${formattedPhone}${testsInfo}${slotInfo}${addrInfo}\nAmount: ₹${totalAmount.toLocaleString()}${couponInfo}`;
 
     console.log('Admin notify phones:', { adminPhone1, adminPhone2 });
 
