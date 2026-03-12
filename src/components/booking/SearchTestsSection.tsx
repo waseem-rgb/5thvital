@@ -334,7 +334,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
         return (
           <CommandGroup>
             {searchSuggestions.map((test) => (
-              <CommandItem key={test.id} onSelect={() => handleSelectTest(test)} className="cursor-pointer">
+              <CommandItem key={test.id} onSelect={() => handleSelectTest(test)} className="cursor-pointer min-h-[56px]">
                 <div className="flex items-center justify-between w-full p-3">
                   <div className="flex flex-col flex-1 min-w-0">
                     <span className="font-semibold text-sm text-foreground truncate">{test.test_name}</span>
@@ -408,7 +408,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
               </PopoverAnchor>
               <PopoverContent className="w-[calc(100vw-2rem)] sm:w-[600px] p-0 z-50" align="start" side="bottom" sideOffset={8}>
                 <Command>
-                  <CommandList className="max-h-[400px]">
+                  <CommandList className="max-h-60 sm:max-h-[400px] overflow-y-auto">
                     {renderCommandContent()}
                   </CommandList>
                 </Command>

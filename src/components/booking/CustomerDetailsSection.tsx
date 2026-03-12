@@ -430,11 +430,6 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
 
     setIsSubmitting(true);
 
-    let bookingCreated = false;
-    let createdBookingId: string | null = null;
-    let customBookingId: string | null = null;
-    let bookingItemsCreated = false;
-
     try {
       // Format phone number
       let formattedPhone = bookingData.customerPhone.trim().replace(/\D/g, '');
@@ -455,145 +450,87 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         const [time, period] = startTime.split(' ');
         const [hours, minutes] = time.split(':');
         let hour24 = parseInt(hours);
-        
+
         if (period === 'PM' && hour24 !== 12) {
           hour24 += 12;
         } else if (period === 'AM' && hour24 === 12) {
           hour24 = 0;
         }
-        
+
         formattedTime = `${hour24.toString().padStart(2, '0')}:${minutes}:00`;
       }
 
-      // STEP 1: Create booking with retry for network errors
-      if (import.meta.env.DEV) {
-        console.log('🟢 [Booking] Step 1: Creating booking in database...');
-      }
-      
-      const bookingData_insert = {
-        user_id: user?.id || null,
-        customer_name: bookingData.customerName,
-        customer_phone: formattedPhone,
-        customer_email: bookingData.customerEmail,
-        customer_age: bookingData.customerAge ? parseInt(bookingData.customerAge) : null,
-        customer_gender: bookingData.customerGender || null,
-        address: bookingData.address,
-        preferred_date: bookingData.preferredDate?.toISOString().split('T')[0],
-        preferred_time: formattedTime,
-        total_amount: getTotalAmount(),
-        discount_percentage: bookingData.discountPercentage,
-        discount_amount: getDiscountAmount(),
-        final_amount: getFinalAmount(),
-        coupon_code: couponStatus.applied ? bookingData.couponCode : null,
-        notes: bookingData.notes || null
-      };
+      // Verify auth state before booking
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      console.log('[Booking] Auth user at booking time:', currentUser?.id, currentUser?.phone);
 
-      // Retry booking creation up to 3 times for network errors
-      let booking: { id: string; custom_booking_id: string | null } | null = null;
-      let lastBookingError: unknown = null;
-      
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const { data, error: bookingError } = await supabase
-            .from('bookings')
-            .insert(bookingData_insert)
-            .select('id, custom_booking_id')
-            .single();
-
-          if (bookingError) {
-            lastBookingError = bookingError;
-            if (!isRetryableError(bookingError) || attempt === 3) {
-              throw bookingError;
-            }
-            if (import.meta.env.DEV) {
-              console.log(`⚠️ [Booking] Attempt ${attempt} failed, retrying...`, bookingError);
-            }
-            await sleep(1500 * attempt);
-            continue;
-          }
-          
-          booking = data;
-          break;
-        } catch (err) {
-          lastBookingError = err;
-          if (!isRetryableError(err) || attempt === 3) {
-            throw err;
-          }
-          if (import.meta.env.DEV) {
-            console.log(`⚠️ [Booking] Attempt ${attempt} error, retrying...`, err);
-          }
-          await sleep(1500 * attempt);
-        }
+      if (!currentUser && user) {
+        console.error('[Booking] Auth session lost! Hook has user but getUser() returned null');
+        throw new Error('Your session has expired. Please log in again.');
       }
 
-      if (!booking) {
-        throw lastBookingError || new Error('Failed to create booking');
-      }
-      
-      bookingCreated = true;
-      createdBookingId = booking.id;
-      customBookingId = booking.custom_booking_id;
-      
-      if (import.meta.env.DEV) {
-        console.log('✅ [Booking] Step 1 SUCCESS - Booking created:', booking.id);
-      }
-
-      // STEP 2: Create booking items with retry
-      if (import.meta.env.DEV) {
-        console.log('🟢 [Booking] Step 2: Creating booking items...');
-      }
-      
-      // Helper to extract UUID from cart item ID
-      // - If original_id is set (packages), use it directly
-      // - If id starts with 'pkg_', strip the prefix to get the UUID
-      // - Otherwise, use id as-is (regular tests should have valid UUIDs)
-      const getItemUuid = (item: TestItem): string => {
-        if (item.original_id) {
-          return item.original_id;
-        }
-        if (item.id.startsWith('pkg_')) {
-          return item.id.slice(4); // Remove 'pkg_' prefix
-        }
+      // Helper to extract ID from cart item
+      const getItemId = (item: TestItem): string => {
+        if (item.original_id) return item.original_id;
+        if (item.id.startsWith('pkg_')) return item.id.slice(4);
         return item.id;
       };
-      
-      const bookingItems = cartItems.map(item => ({
-        booking_id: booking!.id,
+
+      // Build items array for the RPC
+      const itemsPayload = cartItems.map(item => ({
         item_type: item.item_type || 'test',
-        item_id: getItemUuid(item),
+        item_id: getItemId(item),
         item_name: item.test_name,
         quantity: 1,
         unit_price: item.customer_price,
         total_price: item.customer_price
       }));
-      
-      // Log FULL payload in both dev AND production for diagnosing insert failures
-      console.log('[Booking] booking_items payload:', JSON.stringify(bookingItems, null, 2));
 
-      let lastItemsError: unknown = null;
+      console.log('[Booking] Creating booking via atomic RPC...');
+
+      // ATOMIC: Create booking + items in a single DB transaction
+      // Uses SECURITY DEFINER function — bypasses RLS, validates auth internally
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let result: { success: boolean; booking_id?: string; custom_booking_id?: string; error?: string; code?: string } | null = null;
+      let lastError: unknown = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const { error: itemsError } = await supabase
-            .from('booking_items')
-            .insert(bookingItems);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { data, error: rpcError } = await (supabase as any).rpc('create_booking_with_items', {
+            p_user_id: currentUser?.id || null,
+            p_customer_name: bookingData.customerName,
+            p_customer_phone: formattedPhone,
+            p_customer_email: bookingData.customerEmail,
+            p_customer_age: bookingData.customerAge ? parseInt(bookingData.customerAge) : null,
+            p_customer_gender: bookingData.customerGender || null,
+            p_address: bookingData.address,
+            p_preferred_date: bookingData.preferredDate?.toISOString().split('T')[0] || null,
+            p_preferred_time: formattedTime,
+            p_total_amount: getTotalAmount(),
+            p_discount_percentage: bookingData.discountPercentage,
+            p_discount_amount: getDiscountAmount(),
+            p_final_amount: getFinalAmount(),
+            p_coupon_code: couponStatus.applied ? bookingData.couponCode : null,
+            p_notes: bookingData.notes || null,
+            p_items: itemsPayload
+          });
 
-          if (itemsError) {
-            // Always log booking_items errors (even in production)
-            console.error(`[Booking] booking_items insert attempt ${attempt} failed:`, JSON.stringify(itemsError));
-            lastItemsError = itemsError;
-            if (!isRetryableError(itemsError) || attempt === 3) {
-              throw itemsError;
+          if (rpcError) {
+            console.error(`[Booking] RPC attempt ${attempt} failed:`, JSON.stringify(rpcError));
+            lastError = rpcError;
+            if (!isRetryableError(rpcError) || attempt === 3) {
+              throw rpcError;
             }
             await sleep(1500 * attempt);
             continue;
           }
 
-          bookingItemsCreated = true;
+          result = data;
           break;
         } catch (err) {
-          console.error(`[Booking] booking_items insert attempt ${attempt} error:`, err);
-          lastItemsError = err;
+          console.error(`[Booking] RPC attempt ${attempt} error:`, err);
+          lastError = err;
           if (!isRetryableError(err) || attempt === 3) {
             throw err;
           }
@@ -601,17 +538,21 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         }
       }
 
-      if (!bookingItemsCreated) {
-        throw lastItemsError || new Error('Failed to create booking items');
-      }
-      
-      if (import.meta.env.DEV) {
-        console.log('✅ [Booking] Step 2 SUCCESS - Booking items created:', bookingItems.length, 'items');
+      if (!result) {
+        throw lastError || new Error('Failed to create booking');
       }
 
-      // CRITICAL: Both succeeded - show success UI
+      // Check if the DB function returned an error
+      if (!result.success) {
+        console.error('[Booking] DB function error:', result.error, result.code);
+        throw new Error(result.error || 'Booking creation failed in database');
+      }
+
+      console.log('[Booking] SUCCESS - Booking created:', result.booking_id, result.custom_booking_id);
+
+      // Show success UI
       setIsSuccess(true);
-      setBookingId(booking.custom_booking_id || booking.id);
+      setBookingId(result.custom_booking_id || result.booking_id || '');
 
       // Clear cart from localStorage after successful booking
       onBookingSuccess?.();
@@ -635,15 +576,11 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
           .catch((err) => console.error('[Coupon] Usage increment failed:', err));
       }
 
-      // STEP 3: Send SMS (NON-BLOCKING)
-      if (import.meta.env.DEV) {
-        console.log('🟢 [Booking] Step 3: Sending SMS notification (non-blocking)...');
-      }
-      
+      // Send SMS (NON-BLOCKING)
       try {
         const { data: smsResult, error: smsError } = await supabase.functions.invoke('send-booking-sms', {
           body: {
-            bookingId: booking.custom_booking_id || booking.id,
+            bookingId: result.custom_booking_id || result.booking_id,
             customerName: bookingData.customerName,
             customerPhone: formattedPhone,
             totalAmount: getFinalAmount(),
@@ -656,9 +593,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         });
         
         if (smsError) {
-          if (import.meta.env.DEV) {
-            console.warn('⚠️ [Booking] Step 3 - SMS sending failed (non-critical):', smsError);
-          }
+          console.warn('[Booking] SMS failed (non-critical):', smsError);
           setSmsStatus({
             sent: false,
             error: smsError.message || 'SMS service error',
@@ -666,17 +601,8 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
             formattedPhone: formattedPhone
           });
         } else if (smsResult?.success) {
-          if (import.meta.env.DEV) {
-            console.log('✅ [Booking] Step 3 SUCCESS - SMS sent:', smsResult);
-          }
-          setSmsStatus({
-            sent: true,
-            formattedPhone: formattedPhone
-          });
+          setSmsStatus({ sent: true, formattedPhone: formattedPhone });
         } else {
-          if (import.meta.env.DEV) {
-            console.warn('⚠️ [Booking] Step 3 - SMS failed with result:', smsResult);
-          }
           setSmsStatus({
             sent: false,
             error: smsResult?.error || 'Unknown SMS error',
@@ -686,9 +612,6 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
           });
         }
       } catch (smsException) {
-        if (import.meta.env.DEV) {
-          console.warn('⚠️ [Booking] Step 3 - SMS exception (non-critical):', smsException);
-        }
         setSmsStatus({
           sent: false,
           error: smsException instanceof Error ? smsException.message : 'Network error',
@@ -700,21 +623,14 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         title: "Booking Confirmed!",
         description: "Your booking has been successfully submitted. We'll contact you soon.",
       });
-      
-      if (import.meta.env.DEV) {
-        console.log('✅ [Booking] COMPLETE - Booking flow finished successfully');
-      }
-      
+
     } catch (error) {
       const errorMessage = parseSupabaseError(error);
 
-      // ALWAYS log errors (production + dev) for diagnosing
+      // ALWAYS log errors (production + dev)
       console.error('[Booking] ERROR:', {
         error,
         parsedMessage: errorMessage,
-        bookingCreated,
-        bookingItemsCreated,
-        bookingId: createdBookingId,
         errorCode: (error as Record<string, unknown>)?.code,
         errorDetails: (error as Record<string, unknown>)?.details,
         errorHint: (error as Record<string, unknown>)?.hint,
@@ -723,28 +639,11 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
       lastErrorRef.current = error;
       setDebugError(errorMessage);
 
-      if (bookingCreated && !bookingItemsCreated && createdBookingId) {
-        // Rollback: delete the orphaned booking so customer doesn't see a partial ID
-        console.log('[Booking] Rolling back orphaned booking:', createdBookingId);
-        try {
-          await supabase.from('bookings').delete().eq('id', createdBookingId);
-          console.log('[Booking] Orphaned booking deleted successfully');
-        } catch (rollbackErr) {
-          console.error('[Booking] Failed to rollback orphaned booking:', rollbackErr);
-        }
-
-        toast({
-          title: "Booking Failed",
-          description: "There was an issue creating your booking. Please try again.",
-          variant: "destructive"
-        });
-      } else {
-        toast({
-          title: "Booking Failed",
-          description: errorMessage,
-          variant: "destructive"
-        });
-      }
+      toast({
+        title: "Booking Failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -907,9 +806,9 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                 <h3 className="font-semibold text-foreground">Order Summary</h3>
                 <div className="space-y-2">
                   {cartItems.map((item, index) => (
-                    <div key={index} className="flex justify-between text-sm">
-                      <span>{item.test_name}</span>
-                      <span>₹{item.customer_price?.toLocaleString()}</span>
+                    <div key={index} className="flex justify-between gap-2 text-sm">
+                      <span className="flex-1 min-w-0 break-words">{item.test_name}</span>
+                      <span className="shrink-0 font-medium">₹{item.customer_price?.toLocaleString()}</span>
                     </div>
                   ))}
                   {getDiscountAmount() > 0 && (
@@ -1062,7 +961,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
 
   return (
     <section className="min-h-screen bg-gray-50">
-      <div className="container mx-auto px-4 sm:px-6 max-w-4xl py-8 sm:py-12">
+      <div className="container mx-auto px-4 sm:px-6 max-w-4xl py-6 sm:py-12 pb-24 sm:pb-12">
         <div className="space-y-4 sm:space-y-6">
           {/* Debug Error Banner (dev only) */}
           {import.meta.env.DEV && debugError && (
@@ -1121,7 +1020,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                     value={bookingData.customerName}
                     onChange={(e) => handleInputChange('customerName', e.target.value)}
                     placeholder="e.g., Sivananda"
-                    className="bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                    className="bg-white border-gray-300 text-gray-900 placeholder-gray-400 min-h-[48px]"
                     required
                   />
                 </div>
@@ -1132,6 +1031,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                     <Input
                       id="phone"
                       type="tel"
+                      inputMode="tel"
                       value={bookingData.customerPhone}
                       onChange={(e) => handleInputChange('customerPhone', e.target.value)}
                       onFocus={(e) => {
@@ -1141,7 +1041,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                       }}
                       placeholder="e.g., +91 98765 43210"
                       className={cn(
-                        "bg-white border-gray-300 text-gray-900 placeholder-gray-400 pr-10",
+                        "bg-white border-gray-300 text-gray-900 placeholder-gray-400 pr-10 min-h-[48px]",
                         isPhoneValid && "border-green-500 focus-visible:ring-green-500"
                       )}
                       required
@@ -1159,10 +1059,11 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                   <Input
                     id="email"
                     type="email"
+                    inputMode="email"
                     value={bookingData.customerEmail}
                     onChange={(e) => handleInputChange('customerEmail', e.target.value)}
                     placeholder="Optional"
-                    className="bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                    className="bg-white border-gray-300 text-gray-900 placeholder-gray-400 min-h-[48px]"
                   />
                 </div>
 
@@ -1171,10 +1072,11 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                   <Input
                     id="age"
                     type="number"
+                    inputMode="numeric"
                     value={bookingData.customerAge}
                     onChange={(e) => handleInputChange('customerAge', e.target.value)}
                     placeholder="e.g., 28"
-                    className="bg-white border-gray-300 text-gray-900 placeholder-gray-400"
+                    className="bg-white border-gray-300 text-gray-900 placeholder-gray-400 min-h-[48px]"
                   />
                 </div>
 
@@ -1306,13 +1208,13 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
             </div>
 
             {/* Order Summary */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
               <h3 className="text-gray-900 font-semibold mb-4 text-lg">Order Summary</h3>
               <div className="space-y-2 mb-4">
                 {cartItems.map((item) => (
-                  <div key={item.id} className="flex justify-between text-gray-700 text-sm">
-                    <span className="truncate pr-2">{item.test_name}</span>
-                    <span className="flex-shrink-0 font-medium">₹{item.customer_price.toLocaleString()}</span>
+                  <div key={item.id} className="flex justify-between gap-2 text-gray-700 text-sm">
+                    <span className="flex-1 min-w-0 break-words">{item.test_name}</span>
+                    <span className="shrink-0 font-medium">₹{item.customer_price.toLocaleString()}</span>
                   </div>
                 ))}
               </div>
@@ -1327,7 +1229,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                     <span className="font-medium">-₹{getDiscountAmount().toLocaleString()}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-gray-900 font-bold text-xl border-t border-gray-200 pt-3">
+                <div className="flex justify-between text-gray-900 font-bold text-lg sm:text-xl border-t border-gray-200 pt-3">
                   <span>Total Amount</span>
                   <span>₹{getFinalAmount().toLocaleString()}</span>
                 </div>
@@ -1342,14 +1244,17 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
               </div>
             </div>
 
-            <Button 
-              type="submit"
-              disabled={isSubmitting || !bookingData.customerName || !bookingData.customerPhone || !bookingData.preferredDate || !bookingData.preferredTime || !bookingData.address || cartItems.length === 0}
-              className="w-full bg-black hover:bg-gray-800 text-white text-base sm:text-lg py-6 font-semibold rounded-lg"
-              size="lg"
-            >
-              {isSubmitting ? 'Processing...' : 'Confirm Booking'}
-            </Button>
+            {/* Sticky Confirm Button on mobile */}
+            <div className="sticky bottom-0 bg-white pt-3 pb-4 border-t border-gray-100 -mx-4 px-4 sm:mx-0 sm:px-0 sm:static sm:border-0 sm:pt-0 sm:pb-0 safe-area-bottom">
+              <Button
+                type="submit"
+                disabled={isSubmitting || !bookingData.customerName || !bookingData.customerPhone || !bookingData.preferredDate || !bookingData.preferredTime || !bookingData.address || cartItems.length === 0}
+                className="w-full bg-black hover:bg-gray-800 text-white text-base sm:text-lg h-12 sm:py-6 font-semibold rounded-lg"
+                size="lg"
+              >
+                {isSubmitting ? 'Processing...' : 'Confirm Booking'}
+              </Button>
+            </div>
           </form>
         </div>
       </div>

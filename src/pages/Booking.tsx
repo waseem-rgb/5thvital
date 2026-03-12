@@ -139,6 +139,9 @@ const Booking = () => {
 
   const cartTotal = cartItems.reduce((sum, item) => sum + item.customer_price, 0);
 
+  // Hide the floating cart bar when customer details section is open
+  const isInCheckout = accordionValue.includes('details');
+
   return (
     <div className="min-h-screen">
       <MobileAuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
@@ -164,7 +167,7 @@ const Booking = () => {
             className="w-full"
           >
             <AccordionItem value="cart" className="border-none">
-              <AccordionTrigger className="text-2xl sm:text-4xl font-bold text-center py-8 hover:no-underline data-[state=closed]:text-muted-foreground data-[state=open]:text-foreground justify-center">
+              <AccordionTrigger className="text-xl sm:text-4xl font-bold text-center py-6 sm:py-8 hover:no-underline data-[state=closed]:text-muted-foreground data-[state=open]:text-foreground justify-center">
                 Review Your Tests ({cartItems.length})
               </AccordionTrigger>
               <AccordionContent className="pb-0 animate-accordion-down">
@@ -179,7 +182,7 @@ const Booking = () => {
             </AccordionItem>
 
             <AccordionItem value="details" className="border-none">
-              <AccordionTrigger className="text-2xl sm:text-4xl font-bold text-center py-8 hover:no-underline data-[state=closed]:text-muted-foreground data-[state=open]:text-foreground justify-center">
+              <AccordionTrigger className="text-xl sm:text-4xl font-bold text-center py-6 sm:py-8 hover:no-underline data-[state=closed]:text-muted-foreground data-[state=open]:text-foreground justify-center">
                 Customer Details
               </AccordionTrigger>
               <AccordionContent className="pb-0 animate-accordion-down">
@@ -195,8 +198,8 @@ const Booking = () => {
         )}
       </div>
 
-      {/* Floating Cart Bar — always visible when cart has items */}
-      {cartItems.length > 0 && (
+      {/* Floating Cart Bar — hidden when customer details section is open */}
+      {cartItems.length > 0 && !isInCheckout && (
         <div className="fixed bottom-0 left-0 right-0 z-50 bg-foreground text-background border-t shadow-2xl safe-area-bottom">
           <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-4">
             <button

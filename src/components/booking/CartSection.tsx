@@ -22,7 +22,7 @@ const CartSection = ({ cartItems, onRemoveFromCart, onContinueToDetails }: CartS
   };
 
   return (
-    <section className="min-h-screen bg-background flex items-center justify-center py-16 sm:py-24">
+    <section className="min-h-screen bg-background flex items-center justify-center py-8 sm:py-24">
       <div className="container mx-auto px-4 sm:px-6 max-w-4xl">
         {cartItems.length === 0 ? (
           <div className="text-center py-20 sm:py-32">
