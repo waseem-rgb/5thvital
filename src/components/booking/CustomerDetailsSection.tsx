@@ -567,10 +567,8 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         total_price: item.customer_price
       }));
       
-      // Log in both dev AND production for diagnosing insert failures
-      console.log('[Booking] Items to insert:', JSON.stringify(bookingItems.map(bi => ({
-        item_id: bi.item_id, item_type: bi.item_type, item_name: bi.item_name
-      }))));
+      // Log FULL payload in both dev AND production for diagnosing insert failures
+      console.log('[Booking] booking_items payload:', JSON.stringify(bookingItems, null, 2));
 
       let lastItemsError: unknown = null;
 
@@ -709,24 +707,35 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
       
     } catch (error) {
       const errorMessage = parseSupabaseError(error);
-      
-      if (import.meta.env.DEV) {
-        console.error('❌ [Booking] ERROR:', {
-          error,
-          parsedMessage: errorMessage,
-          bookingCreated,
-          bookingItemsCreated,
-          bookingId: createdBookingId
-        });
-      }
-      
+
+      // ALWAYS log errors (production + dev) for diagnosing
+      console.error('[Booking] ERROR:', {
+        error,
+        parsedMessage: errorMessage,
+        bookingCreated,
+        bookingItemsCreated,
+        bookingId: createdBookingId,
+        errorCode: (error as Record<string, unknown>)?.code,
+        errorDetails: (error as Record<string, unknown>)?.details,
+        errorHint: (error as Record<string, unknown>)?.hint,
+      });
+
       lastErrorRef.current = error;
-      setDebugError(import.meta.env.DEV ? errorMessage : null);
-      
-      if (bookingCreated && !bookingItemsCreated) {
+      setDebugError(errorMessage);
+
+      if (bookingCreated && !bookingItemsCreated && createdBookingId) {
+        // Rollback: delete the orphaned booking so customer doesn't see a partial ID
+        console.log('[Booking] Rolling back orphaned booking:', createdBookingId);
+        try {
+          await supabase.from('bookings').delete().eq('id', createdBookingId);
+          console.log('[Booking] Orphaned booking deleted successfully');
+        } catch (rollbackErr) {
+          console.error('[Booking] Failed to rollback orphaned booking:', rollbackErr);
+        }
+
         toast({
-          title: "Partial Booking Issue",
-          description: `Your booking was created (ID: ${customBookingId || createdBookingId}) but there was an issue adding the test items. Please contact support.`,
+          title: "Booking Failed",
+          description: "There was an issue creating your booking. Please try again.",
           variant: "destructive"
         });
       } else {
