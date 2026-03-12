@@ -4,6 +4,7 @@ import SearchTestsSection from '@/components/booking/SearchTestsSection';
 import CartSection from '@/components/booking/CartSection';
 import CustomerDetailsSection from '@/components/booking/CustomerDetailsSection';
 import PrescriptionUploadSection from '@/components/booking/PrescriptionUploadSection';
+import MobileAuthModal from '@/components/auth/MobileAuthModal';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
@@ -132,6 +133,8 @@ const Booking = () => {
   const [cartItems, setCartItems] = useState<TestItem[]>(() => loadCartFromStorage());
   const [hasProceededToBook, setHasProceededToBook] = useState(false);
   const [accordionValue, setAccordionValue] = useState<string[]>([]);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [pendingCheckout, setPendingCheckout] = useState(false);
   const heroRef = useRef<HTMLDivElement>(null);
   const cartRef = useRef<HTMLDivElement>(null);
   const detailsRef = useRef<HTMLDivElement>(null);
@@ -170,7 +173,7 @@ const Booking = () => {
       if (import.meta.env.DEV) {
         console.log('[Cart] User logged in - verifying cart persistence');
       }
-      
+
       // Cart should already be in state from localStorage
       // Double-check and reload if state got cleared somehow
       if (cartItems.length === 0) {
@@ -181,6 +184,15 @@ const Booking = () => {
           }
           setCartItems(storedCart);
         }
+      }
+
+      // If user just logged in after clicking "Continue to Details", auto-advance
+      if (pendingCheckout) {
+        setPendingCheckout(false);
+        setAccordionValue(['cart', 'details']);
+        setTimeout(() => {
+          detailsRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 300);
       }
     }
 
@@ -233,11 +245,18 @@ const Booking = () => {
   }, [cartItems.length]);
 
   const handleContinueToDetails = useCallback(() => {
+    if (!user) {
+      // Guest user — require login before checkout
+      setPendingCheckout(true);
+      setShowAuthModal(true);
+      return;
+    }
     detailsRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+  }, [user]);
 
   return (
     <div className="min-h-screen">
+      <MobileAuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
       <div>
         {/* 1. Hero Section - Video, Nav, Tagline Only */}
         <div ref={heroRef}>

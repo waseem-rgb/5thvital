@@ -13,6 +13,8 @@ interface SMSRequest {
   totalAmount: number;
   scheduledTime?: string;
   scheduledDate?: string;
+  testNames?: string[];
+  address?: string;
 }
 
 function formatPhoneE164India(input: string): string {
@@ -90,6 +92,29 @@ async function sendTwilioSms(params: {
   return { ok: false as const, sid: undefined, response, result };
 }
 
+/**
+ * Read a setting from the settings table.
+ * The settings table stores value as JSONB, which may be a quoted string.
+ */
+async function getSettingValue(supabase: any, key: string, fallback: string = ''): Promise<string> {
+  try {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', key)
+      .single();
+
+    if (error || !data) return fallback;
+
+    const val = data.value;
+    if (typeof val === 'string') return val;
+    if (typeof val === 'object' && val !== null && 'value' in val) return String(val.value);
+    return String(val);
+  } catch {
+    return fallback;
+  }
+}
+
 const handler = async (req: Request): Promise<Response> => {
   console.log('SMS function called');
 
@@ -99,8 +124,8 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate }: SMSRequest = await req.json();
-    console.log('SMS request data:', { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate });
+    const { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate, testNames, address }: SMSRequest = await req.json();
+    console.log('SMS request data:', { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate, testNames, address });
 
     const twilioAccountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
     const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN');
@@ -110,14 +135,12 @@ const handler = async (req: Request): Promise<Response> => {
       console.error('Missing Twilio configuration');
       return new Response(
         JSON.stringify({ error: 'SMS service not configured' }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       );
     }
-
-    console.log('SMS request data:', { bookingId, customerName, customerPhone, totalAmount, scheduledTime, scheduledDate });
 
     const formattedPhone = formatPhoneE164India(customerPhone);
     console.log('Phone number formatting:', {
@@ -126,30 +149,32 @@ const handler = async (req: Request): Promise<Response> => {
       formatted: formattedPhone
     });
 
-    let messageBody = `Hi ${customerName}! Your medical test booking has been confirmed. Total: ₹${totalAmount.toLocaleString()}.`;
-    
+    // ── CUSTOMER SMS (critical) ─────────────────────────────────
+
+    // Fetch helpline number from settings (fallback to default)
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const helplineNumber = await getSettingValue(supabase, 'contact_phone', '+91 8689070763');
+
+    const testsLine = testNames && testNames.length > 0
+      ? `\nTests: ${testNames.join(', ')}`
+      : '';
+    const addressLine = address ? `\nAddress: ${address}` : '';
+
+    let messageBody = `Hi ${customerName}! Your booking is confirmed.\nID: ${bookingId}\nTotal: ₹${totalAmount.toLocaleString()}${testsLine}`;
+
     if (scheduledDate && scheduledTime) {
-      messageBody += ` Home collection scheduled on ${scheduledDate} at ${scheduledTime}.`;
+      messageBody += `\nCollection: ${scheduledDate} at ${scheduledTime}`;
     } else {
-      messageBody += ` We'll contact you soon to schedule home sample collection (6am-11am).`;
+      messageBody += `\nWe'll contact you to schedule home sample collection (6am-11am).`;
     }
-    
-    messageBody += ` Booking ID: ${bookingId}`;
+
+    messageBody += `${addressLine}\nHelpline: ${helplineNumber}\n- 5thVital`;
 
     console.log('Sending SMS to customer:', formattedPhone);
-    console.log('Customer message:', messageBody);
 
-    // Manager/admin notification number (configurable via backend secret)
-    const managerPhoneRaw = Deno.env.get('ADMIN_PHONE_NUMBER') || '+917993448425';
-    const managerPhone = formatPhoneE164India(managerPhoneRaw);
-    
-    // Manager message body
-    const managerMessageBody = `New booking received! Customer: ${customerName} (${formattedPhone}). Total: ₹${totalAmount.toLocaleString()}. ${scheduledDate && scheduledTime ? `Scheduled: ${scheduledDate} at ${scheduledTime}` : 'Schedule pending'}. Booking ID: ${bookingId}`;
-
-    console.log('Sending SMS to manager:', managerPhone);
-    console.log('Manager message:', managerMessageBody);
-
-    // Send SMS to customer (critical)
     const customerSend = await sendTwilioSms({
       accountSid: twilioAccountSid,
       authToken: twilioAuthToken,
@@ -159,23 +184,12 @@ const handler = async (req: Request): Promise<Response> => {
       label: 'Customer',
     });
 
-    // Send SMS to manager/admin (non-critical)
-    const managerSend = await sendTwilioSms({
-      accountSid: twilioAccountSid,
-      authToken: twilioAuthToken,
-      from: twilioFromNumber,
-      to: managerPhone,
-      body: managerMessageBody,
-      label: 'Manager',
-    });
-
     if (!customerSend.ok) {
       const errorInfo = {
         error: `Customer SMS failed: ${customerSend.result?.message || customerSend.result?.detail || 'No response received'}`,
         customerErrorCode: customerSend.result?.code || customerSend.result?.error_code || 'UNKNOWN',
         customerMessage: customerSend.result?.message || customerSend.result?.detail || 'No response received',
         formattedPhone,
-        managerPhone,
         twilioFromNumber,
         customerDetails: customerSend.result,
       };
@@ -188,27 +202,78 @@ const handler = async (req: Request): Promise<Response> => {
       });
     }
 
-    if (!managerSend.ok) {
-      console.warn('Manager/admin SMS failed (non-critical).', {
-        managerPhone,
-        managerDetails: managerSend.result,
-      });
+    // ── ADMIN SMS (non-critical, DB-driven) ─────────────────────
+
+    // Fetch admin phone numbers from settings table
+    // Falls back to ADMIN_PHONE_NUMBER env var → then hardcoded default
+    const envFallback = Deno.env.get('ADMIN_PHONE_NUMBER') || '+917993448425';
+    const adminPhone1Raw = await getSettingValue(supabase, 'admin_notify_phone', envFallback);
+    const adminPhone2Raw = await getSettingValue(supabase, 'admin_notify_phone_2', '');
+
+    const adminPhone1 = adminPhone1Raw ? formatPhoneE164India(adminPhone1Raw) : '';
+    const adminPhone2 = adminPhone2Raw ? formatPhoneE164India(adminPhone2Raw) : '';
+
+    // Admin alert message — compact, scannable format
+    const slotInfo = scheduledDate && scheduledTime
+      ? `Slot: ${scheduledDate} ${scheduledTime}`
+      : 'Schedule pending';
+    const testsInfo = testNames && testNames.length > 0
+      ? `\nTests: ${testNames.join(', ')}`
+      : '';
+    const addrInfo = address ? `\nAddr: ${address}` : '';
+    const adminMessageBody = `🔔 New Booking | ${customerName} | ${slotInfo} | ₹${totalAmount.toLocaleString()} | Ph: ${formattedPhone} | ID: ${bookingId}${testsInfo}${addrInfo}`;
+
+    console.log('Admin notify phones:', { adminPhone1, adminPhone2 });
+
+    // Build admin SMS promises
+    const adminPromises: Promise<{ label: string; ok: boolean; sid?: string; error?: any }>[] = [];
+
+    if (adminPhone1) {
+      adminPromises.push(
+        sendTwilioSms({
+          accountSid: twilioAccountSid,
+          authToken: twilioAuthToken,
+          from: twilioFromNumber,
+          to: adminPhone1,
+          body: adminMessageBody,
+          label: 'Admin-1',
+        }).then(r => ({ label: 'Admin-1', ok: r.ok, sid: r.sid, error: r.ok ? undefined : r.result }))
+      );
     }
+
+    if (adminPhone2) {
+      adminPromises.push(
+        sendTwilioSms({
+          accountSid: twilioAccountSid,
+          authToken: twilioAuthToken,
+          from: twilioFromNumber,
+          to: adminPhone2,
+          body: adminMessageBody,
+          label: 'Admin-2',
+        }).then(r => ({ label: 'Admin-2', ok: r.ok, sid: r.sid, error: r.ok ? undefined : r.result }))
+      );
+    }
+
+    // Fire all admin SMS in parallel — failures logged, never thrown
+    const adminResults = await Promise.allSettled(adminPromises);
+
+    const adminSummary = adminResults.map((r, i) => {
+      if (r.status === 'fulfilled') {
+        if (!r.value.ok) {
+          console.warn(`${r.value.label} SMS failed (non-critical):`, r.value.error);
+        }
+        return { label: r.value.label, ok: r.value.ok, sid: r.value.sid };
+      }
+      console.error(`Admin SMS promise ${i} rejected:`, r.reason);
+      return { label: `Admin-${i + 1}`, ok: false, sid: undefined };
+    });
 
     return new Response(
       JSON.stringify({
         success: true,
         customerMessageSid: customerSend.sid,
-        managerMessageSid: managerSend.sid,
-        managerSmsSent: managerSend.ok,
-        managerError: managerSend.ok
-          ? null
-          : {
-              code: managerSend.result?.code || managerSend.result?.error_code || 'UNKNOWN',
-              message: managerSend.result?.message || managerSend.result?.detail || 'No response received',
-            },
+        adminSmsSummary: adminSummary,
         formattedPhone,
-        managerPhone,
         twilioFromNumber,
       }),
       {

@@ -184,14 +184,11 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
     applied: boolean;
     message: string;
     discount: number;
-  }>({ applied: false, message: '', discount: 0 });
+    discount_type: string;
+  }>({ applied: false, message: '', discount: 0, discount_type: 'percentage' });
 
+  const [isCouponLoading, setIsCouponLoading] = useState(false);
   const [isPhoneValid, setIsPhoneValid] = useState(false);
-
-  // Available coupons
-  const availableCoupons: Record<string, { discount: number; description: string }> = {
-    'SL25': { discount: 25, description: '25% off on all tests' }
-  };
 
   const { toast } = useToast();
 
@@ -201,6 +198,9 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
 
   const getDiscountAmount = () => {
     const total = getTotalAmount();
+    if (couponStatus.discount_type === 'flat') {
+      return Math.min(couponStatus.discount, total);
+    }
     return (total * couponStatus.discount) / 100;
   };
 
@@ -326,30 +326,69 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
     setBookingData(prev => ({ ...prev, [field]: value }));
   };
 
-  const applyCoupon = () => {
-    const couponCode = bookingData.couponCode.toUpperCase().trim();
-    
+  const applyCoupon = async (codeOverride?: string) => {
+    const couponCode = (codeOverride || bookingData.couponCode).toUpperCase().trim();
+
     if (!couponCode) {
-      setCouponStatus({ applied: false, message: 'Please enter a coupon code', discount: 0 });
+      setCouponStatus({ applied: false, message: 'Please enter a coupon code', discount: 0, discount_type: 'percentage' });
       return;
     }
 
-    if (availableCoupons[couponCode]) {
-      const coupon = availableCoupons[couponCode];
-      setCouponStatus({
-        applied: true,
-        message: `Coupon applied! ${coupon.description}`,
-        discount: coupon.discount
+    setIsCouponLoading(true);
+    try {
+      // Call Supabase validate_coupon RPC directly (no admin panel dependency)
+      const { data, error } = await supabase.rpc('validate_coupon', {
+        p_code: couponCode,
+        p_subtotal: getTotalAmount(),
       });
-      setBookingData(prev => ({ ...prev, discountPercentage: coupon.discount }));
-    } else {
-      setCouponStatus({ applied: false, message: 'Invalid coupon code', discount: 0 });
-      setBookingData(prev => ({ ...prev, discountPercentage: 0 }));
+
+      if (error) {
+        console.error('[Coupon] RPC error:', error);
+        setCouponStatus({ applied: false, message: 'Unable to validate coupon. Please try again.', discount: 0, discount_type: 'percentage' });
+        return;
+      }
+
+      if (data?.valid) {
+        const discountValue = Number(data.value) || 0;
+        const discountType = data.type === 'flat' ? 'flat' : 'percentage';
+        setCouponStatus({
+          applied: true,
+          message: data.description || 'Coupon applied!',
+          discount: discountValue,
+          discount_type: discountType,
+        });
+        setBookingData(prev => ({
+          ...prev,
+          couponCode: couponCode,
+          discountPercentage: discountType === 'flat' ? 0 : discountValue,
+        }));
+      } else {
+        setCouponStatus({
+          applied: false,
+          message: data?.error || 'Invalid coupon code',
+          discount: 0,
+          discount_type: 'percentage',
+        });
+        setBookingData(prev => ({ ...prev, discountPercentage: 0 }));
+      }
+    } catch (err) {
+      console.error('[Coupon] Validation error:', err);
+      setCouponStatus({ applied: false, message: 'Unable to validate coupon. Please try again.', discount: 0, discount_type: 'percentage' });
+    } finally {
+      setIsCouponLoading(false);
     }
   };
 
+  // Auto-apply WELCOME35 coupon on first load
+  useEffect(() => {
+    if (cartItems.length > 0 && !couponStatus.applied) {
+      applyCoupon('WELCOME35');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const removeCoupon = () => {
-    setCouponStatus({ applied: false, message: '', discount: 0 });
+    setCouponStatus({ applied: false, message: '', discount: 0, discount_type: 'percentage' });
     setBookingData(prev => ({ ...prev, couponCode: '', discountPercentage: 0 }));
   };
 
@@ -517,8 +556,7 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       
       const bookingItems = cartItems.map(item => ({
         booking_id: booking!.id,
-        // Note: DB constraint only allows 'test' or 'profile', using 'test' for packages too
-        item_type: 'test' as const,
+        item_type: item.item_type || 'test',
         item_id: getItemUuid(item),
         item_name: item.test_name,
         quantity: 1,
@@ -578,7 +616,26 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
       // CRITICAL: Both succeeded - show success UI
       setIsSuccess(true);
       setBookingId(booking.custom_booking_id || booking.id);
-      
+
+      // Increment coupon usage count (non-blocking)
+      if (couponStatus.applied && bookingData.couponCode) {
+        supabase
+          .from('coupons')
+          .select('used_count')
+          .eq('code', bookingData.couponCode.toUpperCase().trim())
+          .single()
+          .then(({ data: coupon }) => {
+            if (coupon) {
+              supabase
+                .from('coupons')
+                .update({ used_count: (coupon.used_count || 0) + 1 })
+                .eq('code', bookingData.couponCode.toUpperCase().trim())
+                .then(() => {});
+            }
+          })
+          .catch((err) => console.error('[Coupon] Usage increment failed:', err));
+      }
+
       // STEP 3: Send SMS (NON-BLOCKING)
       if (import.meta.env.DEV) {
         console.log('🟢 [Booking] Step 3: Sending SMS notification (non-blocking)...');
@@ -592,7 +649,9 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
             customerPhone: formattedPhone,
             totalAmount: getFinalAmount(),
             scheduledDate: bookingData.preferredDate?.toISOString().split('T')[0],
-            scheduledTime: bookingData.preferredTime
+            scheduledTime: bookingData.preferredTime,
+            testNames: cartItems.map(item => item.test_name),
+            address: bookingData.address || undefined,
           }
         });
         
@@ -1173,9 +1232,9 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                       type="text"
                       value={bookingData.couponCode}
                       onChange={(e) => handleInputChange('couponCode', e.target.value.toUpperCase())}
-                      placeholder="Enter coupon code (e.g., SL25)"
+                      placeholder="Enter coupon code"
                       className="bg-white border-gray-300 text-gray-900 placeholder-gray-400"
-                      disabled={couponStatus.applied}
+                      disabled={couponStatus.applied || isCouponLoading}
                     />
                     {!couponStatus.applied ? (
                       <Button
@@ -1184,8 +1243,9 @@ const CustomerDetailsSection = ({ cartItems }: CustomerDetailsSectionProps) => {
                         variant="outline"
                         size="sm"
                         className="bg-white border-gray-300 text-gray-900 hover:bg-gray-50"
+                        disabled={isCouponLoading}
                       >
-                        Apply
+                        {isCouponLoading ? 'Checking...' : 'Apply'}
                       </Button>
                     ) : (
                       <Button

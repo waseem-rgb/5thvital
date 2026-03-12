@@ -1,11 +1,17 @@
 import { User, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
+import { useSettings } from '@/hooks/useSettings';
 import { Link } from 'react-router-dom';
 import Logo from '@/components/Logo';
 
 const BookingHero = () => {
   const { user, signOut } = useAuth();
+  const { getSetting } = useSettings();
+
+  const heroVideoUrl = getSetting('hero_video_url', '/hero-video.mp4');
+  const heroTitle = getSetting('hero_title', 'Precision Diagnostics for Better Health Outcomes');
+  const heroSubtitle = getSetting('hero_subtitle', 'Our partnered laboratories follow strict NABL-standard protocols and use advanced analyzers, automated workflows, and quality-control systems to ensure every test result is accurate, timely, and dependable.');
   
   const scrollToSection = (sectionId: string) => {
     const element = document.querySelector(`[data-${sectionId}]`);
@@ -32,7 +38,7 @@ const BookingHero = () => {
           preload="metadata"
           className="w-full h-full object-cover"
         >
-          <source src="/hero-video.mp4" type="video/mp4" />
+          <source src={heroVideoUrl} type="video/mp4" />
         </video>
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/50"></div>
       </div>
@@ -73,11 +79,11 @@ const BookingHero = () => {
       <div className="relative z-10 flex-1 flex flex-col justify-end px-4 sm:px-6 lg:px-12 pb-12 sm:pb-16 lg:pb-20 pt-12">
         <div className="w-full max-w-7xl">
           <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight text-left mb-6">
-            Precision Diagnostics for Better Health Outcomes
+            {heroTitle}
           </h1>
-          
+
           <p className="text-base sm:text-lg md:text-xl text-white/95 max-w-5xl text-left leading-relaxed">
-            Our partnered laboratories follow strict NABL-standard protocols and use advanced analyzers, automated workflows, and quality-control systems to ensure every test result is accurate, timely, and dependable.
+            {heroSubtitle}
           </p>
         </div>
       </div>

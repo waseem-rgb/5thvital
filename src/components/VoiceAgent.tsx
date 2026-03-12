@@ -264,4 +264,12 @@ const VoiceAgent = ({ className }: VoiceAgentProps) => {
   );
 };
 
-export default VoiceAgent;
+import ErrorBoundary from '@/components/ErrorBoundary';
+
+const VoiceAgentSafe = (props: VoiceAgentProps) => (
+  <ErrorBoundary fallbackMessage="Voice assistant is unavailable right now">
+    <VoiceAgent {...props} />
+  </ErrorBoundary>
+);
+
+export default VoiceAgentSafe;
