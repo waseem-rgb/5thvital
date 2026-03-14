@@ -1,0 +1,50 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(supabase --version)",
+      "Bash(supabase link:*)",
+      "Bash(supabase db:*)",
+      "Bash(supabase functions:*)",
+      "Bash(curl -s \"https://hojbzkodbqqemmaysabf.supabase.co/rest/v1/user_roles?select=*\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvamJ6a29kYnFxZW1tYXlzYWJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MzYwMTksImV4cCI6MjA4NTExMjAxOX0.KDALuj07jIxgVT_f6aK3nyuULF15o-3ZBZatg1St4IM\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvamJ6a29kYnFxZW1tYXlzYWJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MzYwMTksImV4cCI6MjA4NTExMjAxOX0.KDALuj07jIxgVT_f6aK3nyuULF15o-3ZBZatg1St4IM\")",
+      "Bash(npx vercel:*)",
+      "WebFetch(domain:admin.5thvital.in)",
+      "Bash(supabase migration:*)",
+      "Bash(supabase projects:*)",
+      "Read(//Users/waseemafsar/.config/**)",
+      "Read(//Users/waseemafsar/.config/supabase/**)",
+      "Bash(curl -s https://hojbzkodbqqemmaysabf.supabase.co/rest/v1/rpc/sql -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvamJ6a29kYnFxZW1tYXlzYWJmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTUzNjAxOSwiZXhwIjoyMDg1MTEyMDE5fQ.O02KrCVaogkczggJkOAv0O-LRNTH5w6t3NDoAiQB0ys' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvamJ6a29kYnFxZW1tYXlzYWJmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTUzNjAxOSwiZXhwIjoyMDg1MTEyMDE5fQ.O02KrCVaogkczggJkOAv0O-LRNTH5w6t3NDoAiQB0ys' -H 'Content-Type: application/json')",
+      "Bash(npx supabase:*)",
+      "Bash(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@64.227.129.25 \"echo connected\")",
+      "Bash(grep -rn \"from ''''@/integrations/supabase\" src/ --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no root@64.227.129.25 \"echo ''connected'' && node --version 2>/dev/null && nginx -v 2>&1 && pm2 --version 2>/dev/null\")",
+      "Bash(ssh -o ConnectTimeout=10 root@64.227.129.25 'apt-get update -qq && apt-get install -y -qq curl nginx certbot python3-certbot-nginx git 2>&1 | tail -5 && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - 2>&1 | tail -3 && apt-get install -y -qq nodejs 2>&1 | tail -3 && npm install -g pm2 2>&1 | tail -3 && node --version && npm --version && pm2 --version && nginx -v 2>&1')",
+      "Bash(ssh root@64.227.129.25 'mkdir -p /var/www/5thvital-api && pm2 startup systemd -u root --hp /root 2>&1 | tail -3')",
+      "Bash(rsync -avz --exclude='node_modules' --exclude='.git' --exclude='logs' . root@64.227.129.25:/var/www/5thvital-api/)",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && npm ci --production 2>&1 | tail -5 && cp -r src/views dist/views 2>&1 && ls dist/server.js dist/views/login.ejs')",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && mkdir -p logs && pm2 start ecosystem.config.js 2>&1 && sleep 2 && pm2 logs --lines 15 --nostream 2>&1')",
+      "Bash(ssh root@64.227.129.25 'pm2 save 2>&1 | tail -1')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://64.227.129.25:3001/api/settings)",
+      "Bash(curl -s http://64.227.129.25:3001/api/settings)",
+      "Bash(ssh root@64.227.129.25 'apt-get install -y -qq postgresql postgresql-contrib 2>&1 | tail -5 && systemctl start postgresql && systemctl enable postgresql && sudo -u postgres psql -c \"\"SELECT version\\(\\);\"\" 2>&1 | head -5')",
+      "Bash(ssh root@64.227.129.25 'sudo -u postgres psql -d fivthvital -c \"\"GRANT ALL ON SCHEMA public TO fivthvital;\"\"')",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && PGPASSWORD=\"\"5thV1tal_Str0ng_P@ss\"\" psql -U fivthvital -d fivthvital -h localhost -f schema.sql 2>&1')",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && npm ci --production 2>&1 | tail -3 && cp -r src/views dist/views && pm2 restart 5thvital-api 2>&1 | tail -5 && sleep 2 && pm2 logs --lines 10 --nostream 2>&1')",
+      "Bash(ssh root@64.227.129.25 'pm2 logs --lines 30 --nostream 2>&1 | grep -i \"\"error\\\\|FATAL\\\\|admin\\\\|ADMIN\"\"')",
+      "Bash(ssh root@64.227.129.25 'PGPASSWORD=\"\"5thV1tal_Str0ng_P@ss\"\" psql -U fivthvital -d fivthvital -h localhost -c \"\"SELECT 1 as test;\"\" 2>&1')",
+      "Bash(curl -s http://64.227.129.25:3001/health)",
+      "Bash(rsync -avz --exclude='node_modules' --exclude='.git' --exclude='logs' --exclude='.env' . root@64.227.129.25:/var/www/5thvital-api/)",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && cp -r src/views dist/views && pm2 restart 5thvital-api 2>&1 | tail -3 && sleep 2 && curl -s localhost:3001/health')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://64.227.129.25:3001/mgmt-5v-2024/login)",
+      "Bash(ssh root@64.227.129.25 'pm2 logs --lines 5 --nostream 2>&1 | grep -i \"\"out.log\"\" -A 10')",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && node -e \"\"const bcrypt = require\\(\\\\\"\"bcrypt\\\\\"\"\\); bcrypt.hash\\(\\\\\"\"5thVital@Admin2024\\\\\"\", 10\\).then\\(h => console.log\\(h\\)\\)\"\"')",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && ls node_modules | grep bcrypt')",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && node -e \"\"const bcrypt = require\\(\\\\\"\"bcryptjs\\\\\"\"\\); bcrypt.hash\\(\\\\\"\"5thVital@Admin2024\\\\\"\", 10\\).then\\(h => console.log\\(h\\)\\)\"\"')",
+      "Bash(ssh root@64.227.129.25 'cd /var/www/5thvital-api && sed -i \"\"s|ADMIN_PASSWORD_HASH=.*|ADMIN_PASSWORD_HASH=\\\\$2a\\\\$10\\\\$bL5sIekEzalZvEdUTWhXXOrkxjdqhAQdKA9Mjbdi3JD3SBTpBS4am|\"\" .env && pm2 restart 5thvital-api 2>&1 | tail -3 && pm2 save 2>&1 | tail -1')"
+    ],
+    "additionalDirectories": [
+      "/Users/waseemafsar/Desktop/5thvital-admin",
+      "/Users/waseemafsar/Desktop/live_project 2/5thvital-backend"
+    ]
+  }
+}

@@ -543,24 +543,6 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         description: 'Our team will contact you shortly to confirm your booking.',
       });
       setSmsStatus({ sent: true, formattedPhone: bookingData.customerPhone });
-    } catch (_err) {
-      // fallback
-      if (false) {
-        if (import.meta.env.DEV) {
-          console.log('✅ [Booking] SMS resent successfully');
-        }
-        setSmsStatus(prev => ({ ...prev, sent: true, error: undefined }));
-        toast({
-          title: "SMS Sent!",
-          description: "SMS confirmation has been sent successfully.",
-        });
-      } else {
-        setSmsStatus(prev => ({
-          ...prev,
-          sent: false,
-          error: smsResult?.error || 'Unknown error'
-        }));
-      }
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error('❌ [Booking] SMS resend error:', error);
@@ -751,7 +733,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                         Skip
                       </Button>
                     </div>
-                  </form>
+                  </div>
                 </div>
               )}
 
