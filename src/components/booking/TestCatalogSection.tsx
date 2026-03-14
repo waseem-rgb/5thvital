@@ -5,7 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, Plus } from 'lucide-react';
 import type { CartItem } from '@/types/booking';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://64.227.129.25';
+const API_URL = import.meta.env.VITE_API_URL ?? '';
 
 interface MedicalTest {
   id: string;

@@ -3,7 +3,7 @@
  * Replaces Supabase SDK calls with direct REST API calls to our Express backend.
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://api.5thvital.com';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 const TOKEN_KEY = '5v_auth_token';
 const USER_KEY = '5v_auth_user';
