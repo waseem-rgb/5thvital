@@ -261,14 +261,50 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
     }
   }, [user]);
 
-  // Home collection slots - only between 6am-11am
-  const timeSlots = [
+  // Dynamic slot loading from backend
+  const [dynamicSlots, setDynamicSlots] = useState<{ id: string; slotTime: string; availableCount: number }[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!bookingData.preferredDate) {
+      setDynamicSlots([]);
+      return;
+    }
+    const dateStr = bookingData.preferredDate.toISOString().split('T')[0];
+    setSlotsLoading(true);
+    const API_BASE = import.meta.env.VITE_API_URL ?? '';
+    fetch(`${API_BASE}/api/bookings/slots/available?date=${dateStr}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.slots && data.slots.length > 0) {
+          setDynamicSlots(data.slots);
+        } else {
+          setDynamicSlots([]);
+        }
+      })
+      .catch(() => setDynamicSlots([]))
+      .finally(() => setSlotsLoading(false));
+  }, [bookingData.preferredDate]);
+
+  // Fallback static slots if no dynamic slots available
+  const fallbackSlots = [
     '06:00 AM - 07:00 AM',
     '07:00 AM - 08:00 AM',
     '08:00 AM - 09:00 AM',
     '09:00 AM - 10:00 AM',
     '10:00 AM - 11:00 AM'
   ];
+
+  const fmtSlotTime = (t: string) => {
+    const [h, m] = t.split(':').map(Number);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+  };
+
+  const timeSlots = dynamicSlots.length > 0
+    ? dynamicSlots.map(s => fmtSlotTime(s.slotTime))
+    : fallbackSlots;
 
   const handleInputChange = (field: string, value: string) => {
     if (field === 'customerPhone') {

@@ -96,7 +96,10 @@ const PrescriptionUploadSection = () => {
     setPreviews(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleUpload = () => {
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const handleUpload = async () => {
     if (!user) {
       setShowAuthModal(true);
       return;
@@ -111,21 +114,57 @@ const PrescriptionUploadSection = () => {
       return;
     }
 
-    // Here you would implement the actual upload logic
-    toast({
-      title: "Upload successful",
-      description: `${selectedFiles.length} file(s) uploaded successfully`,
-    });
+    setUploading(true);
+    setUploadProgress(0);
 
-    // Scroll to cart section
-    const cartElement = document.querySelector('[data-cart]');
-    if (cartElement) {
-      cartElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const API_BASE = import.meta.env.VITE_API_URL ?? '';
+    let successCount = 0;
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('customerName', user.phone || 'Customer');
+      formData.append('customerPhone', user.phone || '');
+
+      try {
+        const res = await fetch(`${API_BASE}/api/prescriptions/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (res.ok) {
+          successCount++;
+        } else {
+          const data = await res.json().catch(() => ({ error: 'Upload failed' }));
+          toast({
+            title: `Failed to upload ${file.name}`,
+            description: data.error || 'Upload failed',
+            variant: "destructive",
+          });
+        }
+      } catch {
+        toast({
+          title: `Failed to upload ${file.name}`,
+          description: 'Network error. Please try again.',
+          variant: "destructive",
+        });
+      }
+
+      setUploadProgress(Math.round(((i + 1) / selectedFiles.length) * 100));
     }
 
-    // Clear files
-    setSelectedFiles([]);
-    setPreviews([]);
+    setUploading(false);
+    setUploadProgress(0);
+
+    if (successCount > 0) {
+      toast({
+        title: "Upload successful",
+        description: `${successCount} prescription(s) uploaded. Our team will review and contact you shortly.`,
+      });
+      setSelectedFiles([]);
+      setPreviews([]);
+    }
   };
 
   return (
@@ -258,14 +297,24 @@ const PrescriptionUploadSection = () => {
               </div>
 
               {/* Action Buttons */}
+              {uploading && (
+                <div className="w-full bg-white/20 rounded-full h-2">
+                  <div
+                    className="bg-white h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              )}
+
               <div className="flex gap-3 pt-4">
                 <Button
                   onClick={handleUpload}
-                  className="flex-1 gap-2 bg-white text-black hover:bg-white/90 text-sm"
+                  disabled={uploading}
+                  className="flex-1 gap-2 bg-white text-black hover:bg-white/90 text-sm disabled:opacity-60"
                   size="lg"
                 >
                   <Upload className="w-5 h-5" />
-                  {user ? 'Upload Prescription' : 'Sign in to Upload'}
+                  {uploading ? `Uploading ${uploadProgress}%` : user ? 'Upload Prescription' : 'Sign in to Upload'}
                 </Button>
                 <Button
                   onClick={() => {
