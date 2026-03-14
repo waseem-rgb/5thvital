@@ -49,6 +49,7 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
         title: 'Invalid Phone Number',
         description: 'Please enter a valid Indian phone number with +91 followed by 10 digits',
         variant: 'destructive',
+        duration: 3000,
       });
       return;
     }
@@ -72,7 +73,7 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
       if (errorMessage.includes('SMS service') || errorMessage.includes('Server')) {
         errorMessage = 'SMS service is being configured. Please try again in a moment.';
       }
-      toast({ title: 'Error', description: errorMessage, variant: 'destructive' });
+      toast({ title: 'Error', description: errorMessage, variant: 'destructive', duration: 3000 });
     } finally {
       setLoading(false);
     }
@@ -80,7 +81,7 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
 
   const handleVerifyOTP = async () => {
     if (!otp || otp.length !== 6) {
-      toast({ title: 'Invalid OTP', description: 'Please enter the 6-digit verification code', variant: 'destructive' });
+      toast({ title: 'Invalid OTP', description: 'Please enter the 6-digit verification code', variant: 'destructive', duration: 3000 });
       return;
     }
 
@@ -103,7 +104,7 @@ const MobileAuthModal = ({ open, onOpenChange }: MobileAuthModalProps) => {
         throw new Error('Invalid OTP');
       }
     } catch (error: any) {
-      toast({ title: 'Verification Failed', description: error.message || 'Invalid or expired OTP', variant: 'destructive' });
+      toast({ title: 'Verification Failed', description: error.message || 'Invalid or expired OTP', variant: 'destructive', duration: 3000 });
     } finally {
       setLoading(false);
     }
