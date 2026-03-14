@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchBookingById } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -133,42 +133,24 @@ const OrderDetails = () => {
       }
 
       try {
-        const { data: bookingData, error: bookingError } = await supabase
-          .from('bookings')
-          .select('*')
-          .eq('id', orderId)
-          .single();
+        const { data, error: fetchError } = await fetchBookingById(orderId);
 
-        if (bookingError) {
-          console.error('Error fetching booking:', bookingError);
+        if (fetchError || !data?.booking) {
           setError('Order not found');
           setLoading(false);
           return;
         }
 
-        const { data: itemsData, error: itemsError } = await supabase
-          .from('booking_items')
-          .select('*')
-          .eq('booking_id', orderId);
-
-        if (itemsError) {
-          console.error('Error fetching items:', itemsError);
-          setError('Error loading order details');
-          setLoading(false);
-          return;
-        }
-
-        const fullBooking = { ...bookingData, booking_items: itemsData || [] } as BookingDetails;
+        const b = data.booking;
+        const fullBooking = {
+          ...b,
+          booking_items: b.items || [],
+        } as BookingDetails;
         setBooking(fullBooking);
 
-        // Fetch phlebotomist if assigned
-        if (bookingData.phlebotomist_id) {
-          const { data: phleb } = await supabase
-            .from('phlebotomists')
-            .select('name, phone')
-            .eq('id', bookingData.phlebotomist_id)
-            .single();
-          if (phleb) setPhlebotomist(phleb);
+        // Phlebotomist info comes with the booking response if assigned
+        if (b.phlebotomist_name) {
+          setPhlebotomist({ name: b.phlebotomist_name, phone: b.phlebotomist_phone || '' });
         }
       } catch (err) {
         console.error('Unexpected error:', err);
@@ -181,41 +163,23 @@ const OrderDetails = () => {
     fetchBookingDetails();
   }, [orderId]);
 
-  // Realtime subscription — listen for status changes on this booking
+  // Poll for status updates every 30 seconds
   useEffect(() => {
     if (!orderId) return;
 
-    const channel = supabase
-      .channel(`booking-${orderId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'bookings',
-          filter: `id=eq.${orderId}`,
-        },
-        async (payload) => {
-          const updated = payload.new as Record<string, unknown>;
-          setBooking((prev) => (prev ? { ...prev, ...updated } as BookingDetails : prev));
-
-          // If phlebotomist was just assigned, fetch their info
-          if (updated.phlebotomist_id && updated.phlebotomist_id !== booking?.phlebotomist_id) {
-            const { data: phleb } = await supabase
-              .from('phlebotomists')
-              .select('name, phone')
-              .eq('id', updated.phlebotomist_id as string)
-              .single();
-            if (phleb) setPhlebotomist(phleb);
-          }
+    const interval = setInterval(async () => {
+      const { data } = await fetchBookingById(orderId);
+      if (data?.booking) {
+        const b = data.booking;
+        setBooking(prev => prev ? { ...prev, ...b, booking_items: b.items || prev.booking_items } as BookingDetails : prev);
+        if (b.phlebotomist_name) {
+          setPhlebotomist({ name: b.phlebotomist_name, phone: b.phlebotomist_phone || '' });
         }
-      )
-      .subscribe();
+      }
+    }, 30000);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [orderId, booking?.phlebotomist_id]);
+    return () => clearInterval(interval);
+  }, [orderId]);
 
   // ─── Loading ────────────────────────────────────────────────
 

@@ -94,7 +94,7 @@ const Booking = () => {
     prevUserRef.current = user;
   }, [user, authLoading, cartItems.length, pendingCheckout]);
 
-  const handleAddToCart = useCallback((test: TestItem | { id: string; name: string; testCode?: string | null; category?: string | null; price: number }) => {
+  const handleAddToCart = useCallback((test: TestItem | { id: string; name: string; testCode?: string | null; category?: string | null; price: number | string }) => {
     // Normalize camelCase API response to internal snake_case cart format
     const normalized: TestItem = 'test_name' in test
       ? test as TestItem
@@ -103,7 +103,7 @@ const Booking = () => {
           test_name: test.name,
           test_code: test.testCode || '',
           body_system: test.category || '',
-          customer_price: test.price,
+          customer_price: typeof test.price === 'string' ? parseFloat(test.price) : test.price,
         };
 
     setCartItems(prev => {
@@ -148,7 +148,7 @@ const Booking = () => {
     localStorage.removeItem(CART_STORAGE_KEY);
   }, []);
 
-  const cartTotal = cartItems.reduce((sum, item) => sum + item.customer_price, 0);
+  const cartTotal = cartItems.reduce((sum, item) => sum + (typeof item.customer_price === 'string' ? parseFloat(item.customer_price) : item.customer_price), 0);
 
   // Hide the floating cart bar when customer details section is open
   const isInCheckout = accordionValue.includes('details');

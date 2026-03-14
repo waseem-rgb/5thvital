@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import * as api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,11 +16,10 @@ const Auth = () => {
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const { user } = useAuth();
+  const { user, refreshAuth } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Redirect authenticated users to their intended destination or home
   useEffect(() => {
     if (user) {
       const from = (location.state as any)?.from?.pathname || '/';
@@ -38,54 +37,21 @@ const Auth = () => {
     setError('');
 
     try {
-      const { data, error } = await supabase.functions.invoke('send-otp', {
-        body: { phone }
-      });
+      const { data, error: apiError } = await api.sendOTP(phone);
 
-      console.log('[Auth] send-otp response:', { data, error });
+      if (apiError) throw new Error(apiError);
 
-      // supabase.functions.invoke may wrap non-2xx as FunctionsHttpError
-      // but the body may still contain { ok: true } if SMS was sent
-      if (error) {
-        // Try to extract response body from error context
-        const errorContext = (error as any)?.context;
-        let responseBody: any = null;
-        
-        if (errorContext?.json) {
-          try {
-            responseBody = await errorContext.json();
-          } catch {}
-        }
-        
-        console.log('[Auth] Error context body:', responseBody);
-        
-        // If body indicates success, treat as success despite error wrapper
-        if (responseBody?.ok === true) {
-          toast.success('OTP sent! Please check your phone for the verification code.');
-          setStep('otp');
-          return;
-        }
-        
-        throw new Error(responseBody?.error || error.message || 'Failed to send OTP');
-      }
-
-      // Check for ok (backend uses "ok", not "success")
-      if (data?.ok === true) {
+      if (data?.success) {
         toast.success('OTP sent! Please check your phone for the verification code.');
         setStep('otp');
       } else {
-        throw new Error(data?.error || 'Failed to send OTP');
+        throw new Error('Failed to send OTP');
       }
     } catch (error: any) {
-      console.error('[Auth] Send OTP error:', error);
       let errorMessage = error.message || 'Failed to send OTP';
-      
-      if (errorMessage.includes('SMS service not configured') || errorMessage.includes('Server misconfigured')) {
+      if (errorMessage.includes('SMS service') || errorMessage.includes('Server')) {
         errorMessage = 'SMS service is being configured. Please try again in a moment.';
-      } else if (errorMessage.includes('Invalid phone')) {
-        errorMessage = 'Please enter a valid phone number';
       }
-      
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -102,59 +68,17 @@ const Auth = () => {
     setError('');
 
     try {
-      const { data, error } = await supabase.functions.invoke('verify-otp', {
-        body: { phone, otp }
-      });
+      const { data, error: apiError } = await api.verifyOTP(phone, otp);
 
-      console.log('[Auth] verify-otp response:', { data, error });
+      if (apiError) throw new Error(apiError);
 
-      // Handle error case similar to send-otp
-      if (error) {
-        const errorContext = (error as any)?.context;
-        let responseBody: any = null;
-        
-        if (errorContext?.json) {
-          try {
-            responseBody = await errorContext.json();
-          } catch {}
-        }
-        
-        console.log('[Auth] Verify error context body:', responseBody);
-        
-        // If body indicates success, treat as success
-        if (responseBody?.ok === true) {
-          // If edge function returned credentials, sign in on the client
-          if (responseBody.signIn?.email && responseBody.signIn?.password) {
-            const { error: signInError } = await supabase.auth.signInWithPassword({
-              email: responseBody.signIn.email,
-              password: responseBody.signIn.password,
-            });
-            if (signInError) throw signInError;
-          }
-          toast.success('Login successful! Welcome to 5thvital.');
-          return;
-        }
-        
-        throw new Error(responseBody?.error || error.message || 'Invalid OTP');
-      }
-
-      // Check for ok (backend uses "ok", not "success")
-      if (data?.ok === true) {
-        // If edge function returned credentials, sign in on the client
-        if (data.signIn?.email && data.signIn?.password) {
-          const { error: signInError } = await supabase.auth.signInWithPassword({
-            email: data.signIn.email,
-            password: data.signIn.password,
-          });
-          if (signInError) throw signInError;
-        }
-
+      if (data?.success) {
+        refreshAuth();
         toast.success('Login successful! Welcome to 5thvital.');
       } else {
-        throw new Error(data?.error || 'Invalid OTP');
+        throw new Error('Invalid OTP');
       }
     } catch (error: any) {
-      console.error('[Auth] Verify OTP error:', error);
       setError(error.message || 'Invalid or expired OTP');
     } finally {
       setIsLoading(false);
@@ -194,12 +118,12 @@ const Auth = () => {
               {step === 'phone' ? 'Login with Mobile' : 'Verify OTP'}
             </CardTitle>
             <CardDescription className="text-center">
-              {step === 'phone' 
-                ? 'We\'ll send you a verification code' 
+              {step === 'phone'
+                ? 'We\'ll send you a verification code'
                 : `Code sent to ${phone}`}
             </CardDescription>
           </CardHeader>
-          
+
           <CardContent>
             {error && (
               <Alert variant="destructive" className="mb-4">
@@ -223,8 +147,8 @@ const Auth = () => {
                     />
                   </div>
                 </div>
-                
-                <Button 
+
+                <Button
                   onClick={handleSendOTP}
                   disabled={isLoading}
                   className="w-full"
@@ -253,9 +177,9 @@ const Auth = () => {
                     maxLength={6}
                   />
                 </div>
-                
+
                 <div className="space-y-3">
-                  <Button 
+                  <Button
                     onClick={handleVerifyOTP}
                     disabled={isLoading}
                     className="w-full"
@@ -269,7 +193,7 @@ const Auth = () => {
                       'Verify & Login'
                     )}
                   </Button>
-                  
+
                   <Button
                     onClick={handleBack}
                     variant="ghost"
@@ -283,8 +207,8 @@ const Auth = () => {
             )}
 
             <div className="mt-6 text-center">
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 onClick={() => navigate('/')}
                 className="text-muted-foreground hover:text-foreground"
               >

@@ -25,7 +25,15 @@ export function usePackages(): UsePackagesResult {
       setError('Failed to load packages');
       setPackages([]);
     } else if (data?.packages) {
-      setPackages(data.packages as unknown as PackageListItem[]);
+      // API returns prices as strings — coerce to numbers
+      const parsed = data.packages.map((p: any) => ({
+        ...p,
+        price: p.price != null ? parseFloat(p.price) : null,
+        originalPrice: p.originalPrice != null ? parseFloat(p.originalPrice) : null,
+        discountPercent: p.discountPercent != null ? parseFloat(p.discountPercent) : null,
+        testsCount: p.testsCount != null ? Number(p.testsCount) : null,
+      })) as PackageListItem[];
+      setPackages(parsed);
     } else {
       setPackages([]);
     }
@@ -95,13 +103,13 @@ export function usePackageBySlug(slug: string | undefined): {
           status: pkg.status,
           isFeatured: pkg.isFeatured,
           sortOrder: pkg.sortOrder,
-          originalPrice: pkg.originalPrice,
-          price: pkg.price,
-          discountPercent: pkg.discountPercent,
-          reportsWithinHours: pkg.reportsWithinHours,
-          testsCount: pkg.testsCount,
+          originalPrice: pkg.originalPrice != null ? parseFloat(pkg.originalPrice) : null,
+          price: pkg.price != null ? parseFloat(pkg.price) : null,
+          discountPercent: pkg.discountPercent != null ? parseFloat(pkg.discountPercent) : null,
+          reportsWithinHours: pkg.reportsWithinHours != null ? Number(pkg.reportsWithinHours) : null,
+          testsCount: pkg.testsCount != null ? Number(pkg.testsCount) : null,
           requisites: pkg.requisites,
-          homeCollectionMinutes: pkg.homeCollectionMinutes,
+          homeCollectionMinutes: pkg.homeCollectionMinutes != null ? Number(pkg.homeCollectionMinutes) : null,
           highlights: pkg.highlights,
           description: pkg.description,
           parameters: parseJsonArray<ParameterCategory>(pkg.parameters),

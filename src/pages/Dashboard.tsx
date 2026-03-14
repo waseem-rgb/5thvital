@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchUserBookings } from '@/lib/api';
 import Navigation from '@/components/Navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -40,14 +40,10 @@ const Dashboard = () => {
       if (!user) return;
 
       try {
-        const { data, error } = await supabase
-          .from('bookings')
-          .select('id, custom_booking_id, customer_name, status, created_at, final_amount, preferred_date, preferred_time')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
+        const { data, error } = await fetchUserBookings();
 
-        if (error) throw error;
-        setBookings(data || []);
+        if (error) throw new Error(error);
+        setBookings(data?.bookings || []);
       } catch (error) {
         console.error('Error fetching bookings:', error);
         toast.error('Failed to load your bookings');

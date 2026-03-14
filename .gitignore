@@ -16,3 +16,4 @@ supabase/.cache
 # OS
 .DS_Store
 
+.vercel

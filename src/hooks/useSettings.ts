@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'https://api.5thvital.com';
 
 interface SettingsRow {
   key: string;
@@ -7,21 +8,11 @@ interface SettingsRow {
 }
 
 interface UseSettingsResult {
-  /** Get a setting value as string. Returns fallback if not found. */
   getSetting: (key: string, fallback?: string) => string;
-  /** Whether settings are still loading from DB */
   loading: boolean;
-  /** Error message if fetch failed */
   error: string | null;
 }
 
-/**
- * Fetches all rows from the public.settings table on mount.
- * Cached in component state — stale time managed by caller or React Query externally.
- *
- * The settings table uses: key TEXT PRIMARY KEY, value JSONB
- * The value is stored as JSONB, so we extract the string representation.
- */
 export function useSettings(): UseSettingsResult {
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
@@ -29,32 +20,25 @@ export function useSettings(): UseSettingsResult {
 
   useEffect(() => {
     const fetchSettings = async () => {
-      if (!isSupabaseConfigured) {
-        setLoading(false);
-        return;
-      }
-
       try {
-        const { data, error: fetchError } = await supabase
-          .from('settings')
-          .select('key, value');
+        const res = await fetch(`${API_BASE}/api/settings`);
+        const json = await res.json();
 
-        if (fetchError) {
-          console.error('[useSettings] Fetch error:', fetchError);
+        if (!res.ok) {
           setError('Failed to load settings');
           setLoading(false);
           return;
         }
 
         const map: Record<string, unknown> = {};
-        if (data) {
-          (data as SettingsRow[]).forEach((row) => {
+        if (json.settings) {
+          (json.settings as SettingsRow[]).forEach((row) => {
             map[row.key] = row.value;
           });
         }
         setSettings(map);
       } catch (err) {
-        console.error('[useSettings] Unexpected error:', err);
+        console.error('[useSettings] Error:', err);
         setError('Unexpected error loading settings');
       } finally {
         setLoading(false);
@@ -68,7 +52,6 @@ export function useSettings(): UseSettingsResult {
     (key: string, fallback: string = ''): string => {
       const val = settings[key];
       if (val === undefined || val === null) return fallback;
-      // JSONB values may be stored as plain strings or as { "value": "..." }
       if (typeof val === 'string') return val;
       if (typeof val === 'object' && val !== null && 'value' in (val as Record<string, unknown>)) {
         return String((val as Record<string, unknown>).value);

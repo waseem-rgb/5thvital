@@ -14,8 +14,6 @@ import NotFound from "./pages/NotFound";
 import { ConfigErrorBanner } from "./components/ConfigErrorBanner";
 import PromoBanner from "./components/PromoBanner";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { isSupabaseConfigured } from "@/integrations/supabase/client";
-
 /** Redirects legacy /package/:slug to /packages/:slug */
 const PackageRedirect = () => {
   const { slug } = useParams();
@@ -25,11 +23,6 @@ const PackageRedirect = () => {
 const queryClient = new QueryClient();
 
 const App = () => {
-  // Show configuration error page if Supabase env vars are missing
-  if (!isSupabaseConfigured) {
-    return <ConfigErrorBanner />;
-  }
-
   return (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>

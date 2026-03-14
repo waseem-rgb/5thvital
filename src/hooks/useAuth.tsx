@@ -1,49 +1,56 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { getToken, getStoredUser, clearAuth } from '@/lib/api';
+
+interface AuthUser {
+  id: string;
+  phone: string;
+}
 
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: AuthUser | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  /** Call after login to refresh user state from localStorage */
+  refreshAuth: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        console.log('Auth state changed:', event, session);
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log('Initial session:', session);
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+  const refreshAuth = useCallback(() => {
+    const token = getToken();
+    const storedUser = getStoredUser();
+    if (token && storedUser) {
+      setUser(storedUser);
+    } else {
+      setUser(null);
+    }
+    setLoading(false);
   }, []);
 
+  useEffect(() => {
+    refreshAuth();
+
+    // Listen for storage changes (login/logout in other tabs)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === '5v_auth_token' || e.key === '5v_auth_user') {
+        refreshAuth();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [refreshAuth]);
+
   const signOut = async () => {
-    await supabase.auth.signOut();
+    clearAuth();
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signOut, refreshAuth }}>
       {children}
     </AuthContext.Provider>
   );

@@ -103,7 +103,7 @@ export function addPackageToCart(pkg: {
     test_name: pkg.name,
     test_code: pkg.slug.toUpperCase().replace(/-/g, '_'),
     body_system: 'Health Package',
-    customer_price: pkg.price ?? 0,
+    customer_price: pkg.price != null ? (typeof pkg.price === 'string' ? parseFloat(pkg.price) : pkg.price) : 0,
     original_id: pkg.id, // Store the raw UUID for database insertion
     item_type: 'package', // Mark as package for booking_items
   };

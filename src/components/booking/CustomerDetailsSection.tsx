@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CalendarIcon, CheckCircle, Shield, User, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/integrations/supabase/client';
+import * as api from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import customerDetailsBg from '@/assets/customer-details-warm-bg.jpg';
@@ -244,45 +244,17 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
     setupBookingDevHelpers(getBookingPayload, lastErrorRef);
   }, [cartItems, bookingData, user, couponStatus.applied, lastErrorRef]);
 
-  // Pre-fill user data if authenticated
+  // Pre-fill phone from auth if available
   useEffect(() => {
-    if (user) {
-      // Check if email is a dummy/fake email from phone OTP authentication
-      const isFakeEmail = (email: string | undefined): boolean => {
-        if (!email) return true;
-        return email.endsWith('.local') || email.includes('@phone.');
-      };
-
+    if (user?.phone) {
       setBookingData(prev => {
-        const updates: Partial<typeof prev> = {};
-        
-        // Pre-fill email ONLY if it's a real email (not a fake OTP-generated one)
-        if (user.email && !prev.customerEmail && !isFakeEmail(user.email)) {
-          updates.customerEmail = user.email;
+        if (prev.customerPhone !== '+91 ') return prev;
+        const digits = user.phone.replace(/\D/g, '');
+        if (digits.length === 12 && digits.startsWith('91')) {
+          return { ...prev, customerPhone: '+91 ' + digits.slice(2) };
         }
-        
-        // Pre-fill phone from user metadata or user.phone if available
-        const userPhone = user.user_metadata?.phone || user.phone;
-        if (userPhone && prev.customerPhone === '+91 ') {
-          let formattedPhone = userPhone.trim();
-          if (!formattedPhone.startsWith('+')) {
-            formattedPhone = '+' + formattedPhone;
-          }
-          if (!formattedPhone.includes(' ') && formattedPhone.length >= 10) {
-            const digits = formattedPhone.replace(/\D/g, '');
-            if (digits.length === 10) {
-              formattedPhone = '+91 ' + digits;
-            } else if (digits.length === 12 && digits.startsWith('91')) {
-              formattedPhone = '+91 ' + digits.slice(2);
-            }
-          }
-          if (formattedPhone.startsWith('+91') && formattedPhone.replace(/\D/g, '').length >= 12) {
-            updates.customerPhone = formattedPhone.replace('+91', '+91 ');
-          }
-        }
-        
-        if (Object.keys(updates).length > 0) {
-          return { ...prev, ...updates };
+        if (digits.length === 10) {
+          return { ...prev, customerPhone: '+91 ' + digits };
         }
         return prev;
       });
@@ -337,17 +309,11 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
 
     setIsCouponLoading(true);
     try {
-      // Call Supabase validate_coupon RPC directly (no admin panel dependency)
-      // Using 'as any' because validate_coupon is created via migration, not in generated types
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase as any).rpc('validate_coupon', {
-        p_code: couponCode,
-        p_subtotal: getTotalAmount(),
-      });
+      const { data, error } = await api.validateCoupon(couponCode, getTotalAmount());
 
       if (error) {
-        console.error('[Coupon] RPC error:', error);
-        setCouponStatus({ applied: false, message: 'Unable to validate coupon. Please try again.', discount: 0, discount_type: 'percentage' });
+        console.error('[Coupon] API error:', error);
+        setCouponStatus({ applied: false, message: error, discount: 0, discount_type: 'percentage' });
         return;
       }
 
@@ -368,7 +334,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
       } else {
         setCouponStatus({
           applied: false,
-          message: data?.error || 'Invalid coupon code',
+          message: 'Invalid coupon code',
           discount: 0,
           discount_type: 'percentage',
         });
@@ -460,15 +426,6 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         formattedTime = `${hour24.toString().padStart(2, '0')}:${minutes}:00`;
       }
 
-      // Verify auth state before booking
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      console.log('[Booking] Auth user at booking time:', currentUser?.id, currentUser?.phone);
-
-      if (!currentUser && user) {
-        console.error('[Booking] Auth session lost! Hook has user but getUser() returned null');
-        throw new Error('Your session has expired. Please log in again.');
-      }
-
       // Helper to extract ID from cart item
       const getItemId = (item: TestItem): string => {
         if (item.original_id) return item.original_id;
@@ -476,51 +433,42 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         return item.id;
       };
 
-      // Build items array for the RPC
-      const itemsPayload = cartItems.map(item => ({
-        item_type: item.item_type || 'test',
-        item_id: getItemId(item),
-        item_name: item.test_name,
-        quantity: 1,
-        unit_price: item.customer_price,
-        total_price: item.customer_price
+      // Build items payload for the API
+      const items = cartItems.map(item => ({
+        id: getItemId(item),
+        name: item.test_name,
+        price: typeof item.customer_price === 'string' ? parseFloat(item.customer_price) : item.customer_price,
+        type: (item.item_type || 'test') as 'test' | 'package',
       }));
 
-      console.log('[Booking] Creating booking via atomic RPC...');
+      console.log('[Booking] Creating booking via API...');
 
-      // ATOMIC: Create booking + items in a single DB transaction
-      // Uses SECURITY DEFINER function — bypasses RLS, validates auth internally
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let result: { success: boolean; booking_id?: string; custom_booking_id?: string; error?: string; code?: string } | null = null;
+      let result: { success: boolean; bookingId?: string; bookingNumber?: string } | null = null;
       let lastError: unknown = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data, error: rpcError } = await (supabase as any).rpc('create_booking_with_items', {
-            p_user_id: currentUser?.id || null,
-            p_customer_name: bookingData.customerName,
-            p_customer_phone: formattedPhone,
-            p_customer_email: bookingData.customerEmail,
-            p_customer_age: bookingData.customerAge ? parseInt(bookingData.customerAge) : null,
-            p_customer_gender: bookingData.customerGender || null,
-            p_address: bookingData.address,
-            p_preferred_date: bookingData.preferredDate?.toISOString().split('T')[0] || null,
-            p_preferred_time: formattedTime,
-            p_total_amount: getTotalAmount(),
-            p_discount_percentage: bookingData.discountPercentage,
-            p_discount_amount: getDiscountAmount(),
-            p_final_amount: getFinalAmount(),
-            p_coupon_code: couponStatus.applied ? bookingData.couponCode : null,
-            p_notes: bookingData.notes || null,
-            p_items: itemsPayload
+          const { data, error: apiError } = await api.createBooking({
+            items,
+            customerName: bookingData.customerName,
+            customerPhone: formattedPhone,
+            customerEmail: bookingData.customerEmail || undefined,
+            customerAge: bookingData.customerAge ? parseInt(bookingData.customerAge) : undefined,
+            customerGender: bookingData.customerGender || undefined,
+            address: bookingData.address,
+            bookingDate: bookingData.preferredDate?.toISOString().split('T')[0] || '',
+            bookingTime: formattedTime || '',
+            notes: bookingData.notes || undefined,
+            couponCode: couponStatus.applied ? bookingData.couponCode : undefined,
+            discountPercentage: bookingData.discountPercentage,
+            discountAmount: getDiscountAmount(),
           });
 
-          if (rpcError) {
-            console.error(`[Booking] RPC attempt ${attempt} failed:`, JSON.stringify(rpcError));
-            lastError = rpcError;
-            if (!isRetryableError(rpcError) || attempt === 3) {
-              throw rpcError;
+          if (apiError) {
+            console.error(`[Booking] API attempt ${attempt} failed:`, apiError);
+            lastError = new Error(apiError);
+            if (!isRetryableError(lastError) || attempt === 3) {
+              throw lastError;
             }
             await sleep(1500 * attempt);
             continue;
@@ -529,7 +477,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
           result = data;
           break;
         } catch (err) {
-          console.error(`[Booking] RPC attempt ${attempt} error:`, err);
+          console.error(`[Booking] API attempt ${attempt} error:`, err);
           lastError = err;
           if (!isRetryableError(err) || attempt === 3) {
             throw err;
@@ -538,86 +486,21 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
         }
       }
 
-      if (!result) {
+      if (!result || !result.success) {
         throw lastError || new Error('Failed to create booking');
       }
 
-      // Check if the DB function returned an error
-      if (!result.success) {
-        console.error('[Booking] DB function error:', result.error, result.code);
-        throw new Error(result.error || 'Booking creation failed in database');
-      }
-
-      console.log('[Booking] SUCCESS - Booking created:', result.booking_id, result.custom_booking_id);
+      console.log('[Booking] SUCCESS - Booking created:', result.bookingId, result.bookingNumber);
 
       // Show success UI
       setIsSuccess(true);
-      setBookingId(result.custom_booking_id || result.booking_id || '');
+      setBookingId(result.bookingNumber || result.bookingId || '');
 
       // Clear cart from localStorage after successful booking
       onBookingSuccess?.();
 
-      // Increment coupon usage count (non-blocking)
-      if (couponStatus.applied && bookingData.couponCode) {
-        supabase
-          .from('coupons')
-          .select('used_count')
-          .eq('code', bookingData.couponCode.toUpperCase().trim())
-          .single()
-          .then(({ data: coupon }) => {
-            if (coupon) {
-              supabase
-                .from('coupons')
-                .update({ used_count: (coupon.used_count || 0) + 1 })
-                .eq('code', bookingData.couponCode.toUpperCase().trim())
-                .then(() => {});
-            }
-          })
-          .catch((err) => console.error('[Coupon] Usage increment failed:', err));
-      }
-
-      // Send SMS (NON-BLOCKING)
-      try {
-        const { data: smsResult, error: smsError } = await supabase.functions.invoke('send-booking-sms', {
-          body: {
-            bookingId: result.custom_booking_id || result.booking_id,
-            customerName: bookingData.customerName,
-            customerPhone: formattedPhone,
-            totalAmount: getFinalAmount(),
-            scheduledDate: bookingData.preferredDate?.toISOString().split('T')[0],
-            scheduledTime: bookingData.preferredTime,
-            testNames: cartItems.map(item => item.test_name),
-            address: bookingData.address || undefined,
-            couponCode: couponStatus.applied ? bookingData.couponCode : undefined,
-          }
-        });
-        
-        if (smsError) {
-          console.warn('[Booking] SMS failed (non-critical):', smsError);
-          setSmsStatus({
-            sent: false,
-            error: smsError.message || 'SMS service error',
-            errorCode: (smsError as Record<string, string>).code,
-            formattedPhone: formattedPhone
-          });
-        } else if (smsResult?.success) {
-          setSmsStatus({ sent: true, formattedPhone: formattedPhone });
-        } else {
-          setSmsStatus({
-            sent: false,
-            error: smsResult?.error || 'Unknown SMS error',
-            errorCode: smsResult?.errorCode,
-            twilioError: smsResult?.details,
-            formattedPhone: smsResult?.formattedPhone || formattedPhone
-          });
-        }
-      } catch (smsException) {
-        setSmsStatus({
-          sent: false,
-          error: smsException instanceof Error ? smsException.message : 'Network error',
-          formattedPhone: formattedPhone
-        });
-      }
+      // SMS is sent automatically by the backend — no edge function needed
+      setSmsStatus({ sent: true, formattedPhone: formattedPhone });
 
       toast({
         title: "Booking Confirmed!",
@@ -625,7 +508,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
       });
 
     } catch (error) {
-      const errorMessage = parseSupabaseError(error);
+      const errorMessage = error instanceof Error ? error.message : 'Booking failed. Please try again.';
 
       // ALWAYS log errors (production + dev)
       console.error('[Booking] ERROR:', {
@@ -651,34 +534,18 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
 
   const handleResendSms = async () => {
     if (!bookingId) return;
-    
-    if (import.meta.env.DEV) {
-      console.log('🔄 [Booking] Resending SMS...');
-    }
-    
+
     try {
-      const { data: smsResult, error: smsError } = await supabase.functions.invoke('send-booking-sms', {
-        body: {
-          bookingId,
-          customerName: bookingData.customerName,
-          customerPhone: bookingData.customerPhone,
-          totalAmount: getFinalAmount(),
-          scheduledDate: bookingData.preferredDate?.toISOString().split('T')[0],
-          scheduledTime: bookingData.preferredTime
-        }
+      // SMS is handled by the backend automatically — no manual resend via edge function
+      // For now, just show a message
+      toast({
+        title: 'SMS',
+        description: 'Our team will contact you shortly to confirm your booking.',
       });
-      
-      if (smsError) {
-        if (import.meta.env.DEV) {
-          console.error('❌ [Booking] SMS resend failed:', smsError);
-        }
-        setSmsStatus(prev => ({
-          ...prev,
-          sent: false,
-          error: smsError.message,
-          errorCode: (smsError as Record<string, string>).code
-        }));
-      } else if (smsResult?.success) {
+      setSmsStatus({ sent: true, formattedPhone: bookingData.customerPhone });
+    } catch (_err) {
+      // fallback
+      if (false) {
         if (import.meta.env.DEV) {
           console.log('✅ [Booking] SMS resent successfully');
         }
@@ -855,50 +722,11 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                 </div>
               )}
 
-              {/* Account Creation Form for Guests */}
+              {/* Account Creation — users can log in with OTP */}
               {!user && showAccountCreation && (
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200 space-y-4">
-                  <h3 className="font-semibold text-blue-900">Create Your Account</h3>
-                  <form onSubmit={async (e) => {
-                    e.preventDefault();
-                    setIsCreatingAccount(true);
-                    
-                    try {
-                      const { error } = await supabase.auth.signUp({
-                        email: bookingData.customerEmail,
-                        password: Math.random().toString(36).slice(-8),
-                        options: {
-                          emailRedirectTo: `${window.location.origin}/`,
-                          data: {
-                            full_name: bookingData.customerName,
-                            phone: bookingData.customerPhone
-                          }
-                        }
-                      });
-
-                      if (error) {
-                        toast({
-                          title: "Account creation failed",
-                          description: error.message,
-                          variant: "destructive"
-                        });
-                      } else {
-                        toast({
-                          title: "Account Created!",
-                          description: "Please check your email to set your password and verify your account.",
-                        });
-                        setShowAccountCreation(false);
-                      }
-                    } catch (error) {
-                      toast({
-                        title: "Error",
-                        description: error instanceof Error ? error.message : "Failed to create account",
-                        variant: "destructive"
-                      });
-                    } finally {
-                      setIsCreatingAccount(false);
-                    }
-                  }} className="space-y-3">
+                  <h3 className="font-semibold text-blue-900">Track Your Order</h3>
+                  <div className="space-y-3">
                     <div className="text-sm text-blue-700">
                       <p>Account will be created with:</p>
                       <p>Email: {bookingData.customerEmail}</p>

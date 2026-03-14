@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { fetchPageBySlug } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -197,26 +197,20 @@ const CMSPage = () => {
         return;
       }
 
-      const { data, error } = await supabase
-        .from('pages')
-        .select('id, slug, title, content_json, seo_title, seo_description')
-        .eq('slug', slug)
-        .eq('status', 'published')
-        .single();
+      const { data, error } = await fetchPageBySlug(slug);
 
-      if (error || !data) {
+      if (error || !data?.page) {
         setNotFound(true);
       } else {
-        const sections = Array.isArray(data.content_json) ? data.content_json : [];
-        setPage({ ...data, content_json: sections as PageSection[] } as CMSPageData);
+        const p = data.page;
+        const sections = Array.isArray(p.content_json) ? p.content_json : [];
+        setPage({ ...p, content_json: sections as PageSection[] } as CMSPageData);
 
         // Set document title & meta
-        document.title = (data as Record<string, unknown>).seo_title
-          ? String((data as Record<string, unknown>).seo_title)
-          : `${data.title} | 5thvital`;
+        document.title = p.seo_title ? String(p.seo_title) : `${p.title} | 5thvital`;
         const metaDesc = document.querySelector('meta[name="description"]');
-        if (metaDesc && (data as Record<string, unknown>).seo_description) {
-          metaDesc.setAttribute('content', String((data as Record<string, unknown>).seo_description));
+        if (metaDesc && p.seo_description) {
+          metaDesc.setAttribute('content', String(p.seo_description));
         }
       }
 

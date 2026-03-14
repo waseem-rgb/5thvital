@@ -232,8 +232,8 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 ml-2 flex-shrink-0">
-                    {test.price > 0 && (
-                      <span className="text-sm font-semibold text-primary">₹{test.price.toLocaleString()}</span>
+                    {parseFloat(String(test.price)) > 0 && (
+                      <span className="text-sm font-semibold text-primary">₹{parseFloat(String(test.price)).toLocaleString()}</span>
                     )}
                     <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors">
                       <Plus className="h-3.5 w-3.5" />
