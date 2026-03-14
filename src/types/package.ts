@@ -24,26 +24,24 @@ export interface FAQ {
 }
 
 /**
- * PackagePublic type - represents a package from the public.packages table.
- * 
- * This is a READ-ONLY type for the public site.
+ * PackagePublic type - represents a package from the API.
  */
 export interface PackagePublic {
   id: string;
   slug: string;
-  title: string;
+  name: string;
   status: string;
-  is_featured: boolean;
-  sort_order: number | null;
+  isFeatured: boolean;
+  sortOrder: number | null;
   // Pricing
-  mrp: number | null;
+  originalPrice: number | null;
   price: number | null;
-  discount_percent: number | null;
+  discountPercent: number | null;
   // Snapshot info
-  reports_within_hours: number | null;
-  tests_included: number | null;
+  reportsWithinHours: number | null;
+  testsCount: number | null;
   requisites: string | null;
-  home_collection_minutes: number | null;
+  homeCollectionMinutes: number | null;
   // Content
   highlights: string | null;
   description: string | null;
@@ -54,23 +52,22 @@ export interface PackagePublic {
 
 /**
  * PackageListItem - Subset of PackagePublic for listing views
- * Only includes fields needed for cards/previews
  */
 export interface PackageListItem {
   id: string;
   slug: string;
-  title: string;
+  name: string;
   status: string;
-  is_featured: boolean;
-  sort_order: number | null;
-  mrp: number | null;
+  isFeatured: boolean;
+  sortOrder: number | null;
+  originalPrice: number | null;
   price: number | null;
-  discount_percent: number | null;
-  tests_included: number | null;
+  discountPercent: number | null;
+  testsCount: number | null;
 }
 
 /**
- * Type guard to validate PackagePublic data from database
+ * Type guard to validate PackagePublic data from API
  */
 export function isValidPackage(data: unknown): data is PackagePublic {
   if (!data || typeof data !== 'object') return false;
@@ -78,15 +75,13 @@ export function isValidPackage(data: unknown): data is PackagePublic {
   return (
     typeof obj.id === 'string' &&
     typeof obj.slug === 'string' &&
-    typeof obj.title === 'string' &&
-    typeof obj.status === 'string' &&
-    typeof obj.is_featured === 'boolean' &&
-    (obj.sort_order === null || typeof obj.sort_order === 'number')
+    typeof obj.name === 'string' &&
+    typeof obj.status === 'string'
   );
 }
 
 /**
- * Type guard to validate PackageListItem data from database
+ * Type guard to validate PackageListItem data from API
  */
 export function isValidPackageListItem(data: unknown): data is PackageListItem {
   if (!data || typeof data !== 'object') return false;
@@ -94,8 +89,7 @@ export function isValidPackageListItem(data: unknown): data is PackageListItem {
   return (
     typeof obj.id === 'string' &&
     typeof obj.slug === 'string' &&
-    typeof obj.title === 'string' &&
-    typeof obj.status === 'string' &&
-    typeof obj.is_featured === 'boolean'
+    typeof obj.name === 'string' &&
+    typeof obj.status === 'string'
   );
 }

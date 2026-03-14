@@ -1,29 +1,12 @@
 import { Search, Plus, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
+import { searchTests, TestResult } from '@/lib/api';
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 
-/**
- * Medical test data from the `medical_tests_import` table.
- * This table contains the imported test catalog data with public read access.
- */
-interface MedicalTestImport {
-  id: string;
-  test_name: string;
-  test_code: string | null;
-  description: string | null;
-  body_system: string | null;
-  customer_price: number;
-  sample_type: string | null;
-  report_delivered_in: string | null;
-  synonyms: string | null;
-  profile_name: string | null;
-}
-
-type TestSuggestion = Pick<MedicalTestImport, 'id' | 'test_name' | 'test_code' | 'body_system' | 'customer_price' | 'sample_type' | 'report_delivered_in' | 'profile_name'>;
+type TestSuggestion = TestResult;
 
 interface SearchTestsSectionProps {
   onAddToCart: (test: TestSuggestion) => void;
@@ -32,34 +15,7 @@ interface SearchTestsSectionProps {
 type SearchState = 'idle' | 'loading' | 'results' | 'empty' | 'error';
 
 const MIN_SEARCH_LENGTH = 2;
-const DEBOUNCE_MS = 300; // 300ms debounce (within 250-350ms range)
-const MAX_RESULTS = 20;
-
-/**
- * DEV-ONLY: Sanity check function to test Supabase connection and query
- * Call this from browser console: window.__testMedicalTestsSearch?.('lipid')
- */
-const setupDevSanityCheck = () => {
-  if (import.meta.env.DEV && typeof window !== 'undefined') {
-    (window as unknown as Record<string, unknown>).__testMedicalTestsSearch = async (term: string = 'lipid') => {
-      console.log(`[DEV] Running sanity check for "${term}" on medical_tests_import...`);
-      const { data, error } = await supabase
-        .from('medical_tests_import')
-        .select('test_name,test_code,customer_price')
-        .ilike('test_name', `%${term}%`)
-        .limit(5);
-      
-      if (error) {
-        console.error('[DEV] Sanity check error:', error);
-        return { error };
-      }
-      
-      console.log('[DEV] Sanity check results:', data);
-      return { data };
-    };
-    console.log('[DEV] Medical tests search sanity check available. Run: window.__testMedicalTestsSearch("lipid")');
-  }
-};
+const DEBOUNCE_MS = 300;
 
 const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -69,127 +25,63 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const previousTestsRef = useRef<TestSuggestion[]>([]); // Use ref instead of state to avoid re-renders
-  const requestIdRef = useRef<number>(0); // Track request ID to handle race conditions
+  const previousTestsRef = useRef<TestSuggestion[]>([]);
+  const requestIdRef = useRef<number>(0);
   const { toast } = useToast();
 
-  // Setup dev sanity check on mount
-  useEffect(() => {
-    setupDevSanityCheck();
-  }, []);
-
-  // Debounced search function - no state dependencies to avoid infinite loops
   const performSearch = useCallback(async (term: string, currentTests: TestSuggestion[]) => {
-    // Increment request ID to track this specific request
     const currentRequestId = ++requestIdRef.current;
 
-    // Cancel any in-flight request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
     abortControllerRef.current = new AbortController();
 
-    // Check Supabase configuration
-    if (!isSupabaseConfigured) {
-      setSearchState('error');
-      setErrorMessage('Search service is not configured. Please try again later.');
-      if (import.meta.env.DEV) {
-        console.error('[SearchTestsSection] Supabase not configured - missing env vars');
-      }
-      return;
-    }
-
-    // Store current results for showing during load (prevents flicker)
     if (currentTests.length > 0) {
       previousTestsRef.current = currentTests;
     }
-    
+
     setSearchState('loading');
     setErrorMessage(null);
 
     try {
-      // Query medical_tests_import table
-      // Search across test_name, test_code, synonyms, and profile_name using OR with ILIKE
-      const { data, error } = await supabase
-        .from('medical_tests_import')
-        .select('id, test_name, test_code, body_system, customer_price, sample_type, report_delivered_in, profile_name')
-        .or(`test_name.ilike.%${term}%,test_code.ilike.%${term}%,synonyms.ilike.%${term}%,profile_name.ilike.%${term}%`)
-        .order('test_name', { ascending: true })
-        .limit(MAX_RESULTS);
+      const { data, error } = await searchTests(term);
 
-      // Check if this is a stale response (another request was made after this one)
-      if (currentRequestId !== requestIdRef.current) {
-        if (import.meta.env.DEV) {
-          console.log(`[SearchTestsSection] Discarding stale response for "${term}" (request ${currentRequestId}, current ${requestIdRef.current})`);
-        }
-        return; // Discard stale response
-      }
+      if (currentRequestId !== requestIdRef.current) return;
 
-      // Log query results in development for debugging
-      if (import.meta.env.DEV) {
-        console.log(`[SearchTestsSection] Query for "${term}":`, {
-          resultsCount: data?.length ?? 0,
-          error: error?.message ?? null,
-          errorCode: error?.code ?? null,
-          table: 'medical_tests_import',
-          data: data?.slice(0, 3) // Log first 3 results for debugging
-        });
-      }
+      if (error) throw new Error(error);
 
-      if (error) {
-        throw error;
-      }
-
-      const results = (data || []) as TestSuggestion[];
+      const results = (data?.tests || []) as TestSuggestion[];
       setTests(results);
       previousTestsRef.current = results;
-      
+
       if (results.length > 0) {
         setSearchState('results');
       } else {
         setSearchState('empty');
       }
-      
+
       setOpen(true);
     } catch (err) {
-      const errorObj = err as { message?: string; code?: string; name?: string };
-      
-      // Don't treat abort as error
-      if (errorObj.name === 'AbortError') {
-        return;
-      }
+      const errorObj = err as { message?: string; name?: string };
 
-      // Check if this is a stale response
-      if (currentRequestId !== requestIdRef.current) {
-        return; // Discard stale error
-      }
-      
-      // Log detailed error in development
-      if (import.meta.env.DEV) {
-        console.error('[SearchTestsSection] Search error:', errorObj);
-      }
+      if (errorObj.name === 'AbortError') return;
+      if (currentRequestId !== requestIdRef.current) return;
 
-      // Handle specific error cases
-      if (errorObj.message?.includes('permission') || errorObj.code === '42501') {
-        setErrorMessage('Search is temporarily unavailable. Please try again later.');
-      } else if (errorObj.message?.includes('not configured')) {
-        setErrorMessage('Search service is not configured.');
-      } else if (errorObj.message?.includes('Failed to fetch') || errorObj.message?.includes('network')) {
+      if (errorObj.message?.includes('Network') || errorObj.message?.includes('Failed to fetch')) {
         setErrorMessage('Network error. Please check your connection.');
       } else {
         setErrorMessage('Search failed. Please try again.');
       }
-      
+
       setSearchState('error');
       setTests([]);
     }
-  }, []); // No dependencies - function is stable
+  }, []);
 
-  // Effect to trigger search with debounce
   useEffect(() => {
     const term = searchTerm.trim();
-    
-    // Reset state for empty/short searches
+
     if (!term || term.length < MIN_SEARCH_LENGTH) {
       setTests([]);
       previousTestsRef.current = [];
@@ -199,7 +91,6 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
       return;
     }
 
-    // Debounce the search - capture current tests for the closure
     const currentTests = tests;
     const timer = setTimeout(() => {
       performSearch(term, currentTests);
@@ -208,9 +99,8 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     return () => {
       clearTimeout(timer);
     };
-  }, [searchTerm]); // Only depend on searchTerm, not performSearch or tests
+  }, [searchTerm]);
 
-  // Cleanup abort controller on unmount
   useEffect(() => {
     return () => {
       if (abortControllerRef.current) {
@@ -244,7 +134,7 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     onAddToCart(test);
     toast({
       title: "Added to cart",
-      description: `${test.test_name} has been added to your cart.`,
+      description: `${test.name} has been added to your cart.`,
     });
     setSearchTerm('');
     setTests([]);
@@ -252,7 +142,6 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     setSearchState('idle');
     setOpen(false);
 
-    // Scroll to cart section after adding
     setTimeout(() => {
       const cartElement = document.querySelector('[data-cart]');
       if (cartElement) {
@@ -261,30 +150,27 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
     }, 300);
   };
 
-  // Determine which tests to show (previous during loading to prevent flicker)
-  const displayTests = searchState === 'loading' && previousTestsRef.current.length > 0 
-    ? previousTestsRef.current 
+  const displayTests = searchState === 'loading' && previousTestsRef.current.length > 0
+    ? previousTestsRef.current
     : tests;
 
   const searchSuggestions = displayTests.slice(0, 8);
 
-  // Render content based on search state
   const renderCommandContent = () => {
     switch (searchState) {
       case 'loading':
         return (
           <CommandGroup>
             {previousTestsRef.current.length > 0 ? (
-              // Show previous results with loading indicator
               searchSuggestions.map((test) => (
                 <CommandItem key={test.id} disabled className="opacity-50">
                   <div className="flex items-center justify-between w-full p-3">
                     <div className="flex flex-col flex-1">
-                      <span className="font-medium text-sm">{test.test_name}</span>
+                      <span className="font-medium text-sm">{test.name}</span>
                       <span className="text-xs text-muted-foreground">
-                        {test.test_code && <span>{test.test_code}</span>}
-                        {test.sample_type && <span> • {test.sample_type}</span>}
-                        {test.report_delivered_in && <span> • {test.report_delivered_in}</span>}
+                        {test.testCode && <span>{test.testCode}</span>}
+                        {test.sampleType && <span> • {test.sampleType}</span>}
+                        {test.turnaroundTime && <span> • {test.turnaroundTime}</span>}
                       </span>
                     </div>
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -292,7 +178,6 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
                 </CommandItem>
               ))
             ) : (
-              // Show skeleton loaders
               Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="p-3">
                   <Skeleton className="h-5 w-3/4 mb-2" />
@@ -337,18 +222,18 @@ const SearchTestsSection = ({ onAddToCart }: SearchTestsSectionProps) => {
               <CommandItem key={test.id} onSelect={() => handleSelectTest(test)} className="cursor-pointer min-h-[56px]">
                 <div className="flex items-center justify-between w-full p-3">
                   <div className="flex flex-col flex-1 min-w-0">
-                    <span className="font-semibold text-sm text-foreground truncate">{test.test_name}</span>
+                    <span className="font-semibold text-sm text-foreground truncate">{test.name}</span>
                     <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                      {test.test_code && (
-                        <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] font-mono">{test.test_code}</span>
+                      {test.testCode && (
+                        <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] font-mono">{test.testCode}</span>
                       )}
-                      {test.sample_type && <span>• {test.sample_type}</span>}
-                      {test.report_delivered_in && <span>• {test.report_delivered_in}</span>}
+                      {test.sampleType && <span>• {test.sampleType}</span>}
+                      {test.turnaroundTime && <span>• {test.turnaroundTime}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-3 ml-2 flex-shrink-0">
-                    {test.customer_price > 0 && (
-                      <span className="text-sm font-semibold text-primary">₹{test.customer_price.toLocaleString()}</span>
+                    {test.price > 0 && (
+                      <span className="text-sm font-semibold text-primary">₹{test.price.toLocaleString()}</span>
                     )}
                     <button className="bg-primary text-primary-foreground hover:bg-primary/90 px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors">
                       <Plus className="h-3.5 w-3.5" />

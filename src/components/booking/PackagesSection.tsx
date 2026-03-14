@@ -232,9 +232,9 @@ const PackagesSection = () => {
             <div className="flex gap-6" style={{ minWidth: 'min-content' }}>
               {packages.map((pkg, index) => {
                 const hasPrice = pkg.price !== null;
-                const hasMrp = pkg.mrp !== null;
-                const hasDiscount = pkg.discount_percent !== null && pkg.discount_percent > 0;
-                const hasTests = pkg.tests_included !== null && pkg.tests_included > 0;
+                const hasMrp = pkg.originalPrice !== null;
+                const hasDiscount = pkg.discountPercent !== null && pkg.discountPercent > 0;
+                const hasTests = pkg.testsCount !== null && pkg.testsCount > 0;
 
                 return (
                   <Card
@@ -247,9 +247,9 @@ const PackagesSection = () => {
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between gap-2">
                         <CardTitle className="text-lg font-semibold text-foreground line-clamp-2">
-                          {pkg.title}
+                          {pkg.name}
                         </CardTitle>
-                        {pkg.is_featured && (
+                        {pkg.isFeatured && (
                           <Badge variant="secondary" className="ml-2 shrink-0 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
                             <Star className="h-3 w-3 mr-1 fill-current" />
                             Featured
@@ -264,7 +264,7 @@ const PackagesSection = () => {
                         <div className="flex items-center gap-2 mb-3">
                           {hasMrp && hasDiscount && (
                             <span className="text-sm text-muted-foreground line-through">
-                              {formatPrice(pkg.mrp)}
+                              {formatPrice(pkg.originalPrice)}
                             </span>
                           )}
                           {hasPrice && (
@@ -274,7 +274,7 @@ const PackagesSection = () => {
                           )}
                           {hasDiscount && (
                             <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs">
-                              {pkg.discount_percent}% OFF
+                              {pkg.discountPercent}% OFF
                             </Badge>
                           )}
                         </div>
@@ -284,7 +284,7 @@ const PackagesSection = () => {
                       {hasTests && (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <TestTube className="h-4 w-4" />
-                          <span>{pkg.tests_included} tests included</span>
+                          <span>{pkg.testsCount} tests included</span>
                         </div>
                       )}
 

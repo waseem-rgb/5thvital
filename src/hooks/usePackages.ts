@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
+import { fetchPackages, fetchPackageBySlug } from '@/lib/api';
 import type { PackagePublic, PackageListItem, ParameterCategory, FAQ } from '@/types/package';
 
 interface UsePackagesResult {
@@ -9,103 +9,37 @@ interface UsePackagesResult {
   refetch: () => Promise<void>;
 }
 
-/**
- * Columns selected for package listing (cards/previews)
- */
-const LIST_COLUMNS = `
-  id, slug, title, status, is_featured, sort_order,
-  mrp, price, discount_percent, tests_included
-`;
-
-/**
- * Columns selected for single package detail view
- */
-const DETAIL_COLUMNS = `
-  id, slug, title, status, is_featured, sort_order,
-  mrp, price, discount_percent,
-  reports_within_hours, tests_included, requisites, home_collection_minutes,
-  highlights, description, parameters, faqs
-`;
-
-/**
- * Fetch all published packages from public.packages table.
- * 
- * Query:
- *   SELECT ... FROM packages
- *   WHERE status = 'published'
- *   ORDER BY is_featured DESC, sort_order ASC
- * 
- * - Featured packages appear first (is_featured DESC)
- * - Then sorted by sort_order (ASC, nulls last)
- * - No limit: shows all published packages
- * 
- * READ-ONLY: No inserts/updates/deletes
- */
 export function usePackages(): UsePackagesResult {
   const [packages, setPackages] = useState<PackageListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPackages = async () => {
-    if (!isSupabaseConfigured) {
-      console.error('[usePackages] Supabase not configured');
-      setError('Database not configured');
-      setLoading(false);
-      return;
-    }
-
+  const doFetch = async () => {
     setLoading(true);
     setError(null);
 
-    try {
-      // Database-level ordering: is_featured DESC, sort_order ASC
-      const { data, error: fetchError } = await supabase
-        .from('packages')
-        .select(LIST_COLUMNS)
-        .eq('status', 'published')
-        .order('is_featured', { ascending: false })
-        .order('sort_order', { ascending: true, nullsFirst: false });
+    const { data, error: fetchError } = await fetchPackages();
 
-      if (fetchError) {
-        console.error('[usePackages] Fetch error:', fetchError);
-        setError('Failed to load packages');
-        setPackages([]);
-        return;
-      }
-
-      if (!data || data.length === 0) {
-        if (import.meta.env.DEV) {
-          console.log('[usePackages] No packages found');
-        }
-        setPackages([]);
-        return;
-      }
-
-      if (import.meta.env.DEV) {
-        console.log('[usePackages] Loaded', data.length, 'packages');
-      }
-      
-      // Data is already sorted by DB: is_featured DESC, sort_order ASC
-      setPackages(data as unknown as PackageListItem[]);
-    } catch (err) {
-      console.error('[usePackages] Unexpected error:', err);
-      setError('Unexpected error loading packages');
+    if (fetchError) {
+      console.error('[usePackages] Fetch error:', fetchError);
+      setError('Failed to load packages');
       setPackages([]);
-    } finally {
-      setLoading(false);
+    } else if (data?.packages) {
+      setPackages(data.packages as unknown as PackageListItem[]);
+    } else {
+      setPackages([]);
     }
+
+    setLoading(false);
   };
 
   useEffect(() => {
-    fetchPackages();
+    doFetch();
   }, []);
 
-  return { packages, loading, error, refetch: fetchPackages };
+  return { packages, loading, error, refetch: doFetch };
 }
 
-/**
- * Parse JSON field safely to typed array
- */
 function parseJsonArray<T>(data: unknown): T[] | null {
   if (!data) return null;
   if (Array.isArray(data)) return data as T[];
@@ -120,19 +54,6 @@ function parseJsonArray<T>(data: unknown): T[] | null {
   return null;
 }
 
-/**
- * Fetch a single package by slug from public.packages table.
- * 
- * Query:
- *   SELECT ... FROM packages
- *   WHERE slug = :slug AND status = 'published'
- *   LIMIT 1
- * 
- * - Returns full package data including parameters and FAQs
- * - Returns notFound if package doesn't exist or isn't published
- * 
- * READ-ONLY: No inserts/updates/deletes
- */
 export function usePackageBySlug(slug: string | undefined): {
   package_data: PackagePublic | null;
   loading: boolean;
@@ -145,16 +66,9 @@ export function usePackageBySlug(slug: string | undefined): {
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    const fetchPackage = async () => {
+    const doFetch = async () => {
       if (!slug) {
         setNotFound(true);
-        setLoading(false);
-        return;
-      }
-
-      if (!isSupabaseConfigured) {
-        console.error('[usePackageBySlug] Supabase not configured');
-        setError('Database not configured');
         setLoading(false);
         return;
       }
@@ -163,71 +77,46 @@ export function usePackageBySlug(slug: string | undefined): {
       setError(null);
       setNotFound(false);
 
-      try {
-        const { data, error: fetchError } = await supabase
-          .from('packages')
-          .select(DETAIL_COLUMNS)
-          .eq('slug', slug)
-          .eq('status', 'published')
-          .single();
+      const { data, error: fetchError } = await fetchPackageBySlug(slug);
 
-        if (fetchError) {
-          if (fetchError.code === 'PGRST116') {
-            // No rows returned
-            if (import.meta.env.DEV) {
-              console.log('[usePackageBySlug] Package not found:', slug);
-            }
-            setNotFound(true);
-            setPackageData(null);
-          } else {
-            console.error('[usePackageBySlug] Fetch error:', fetchError);
-            setError('Failed to load package');
-            setPackageData(null);
-          }
-          return;
-        }
-
-        if (!data) {
+      if (fetchError) {
+        if (fetchError.includes('not found') || fetchError.includes('404')) {
           setNotFound(true);
-          setPackageData(null);
-          return;
+        } else {
+          setError('Failed to load package');
         }
-
-        // Convert database row to typed PackagePublic
-        const typedPackage: PackagePublic = {
-          id: data.id,
-          slug: data.slug,
-          title: data.title,
-          status: data.status,
-          is_featured: data.is_featured,
-          sort_order: data.sort_order,
-          mrp: data.mrp,
-          price: data.price,
-          discount_percent: data.discount_percent,
-          reports_within_hours: data.reports_within_hours,
-          tests_included: data.tests_included,
-          requisites: data.requisites,
-          home_collection_minutes: data.home_collection_minutes,
-          highlights: data.highlights,
-          description: data.description,
-          parameters: parseJsonArray<ParameterCategory>(data.parameters),
-          faqs: parseJsonArray<FAQ>(data.faqs),
-        };
-
-        if (import.meta.env.DEV) {
-          console.log('[usePackageBySlug] Loaded package:', typedPackage.title);
-        }
-        setPackageData(typedPackage);
-      } catch (err) {
-        console.error('[usePackageBySlug] Unexpected error:', err);
-        setError('Unexpected error loading package');
         setPackageData(null);
-      } finally {
-        setLoading(false);
+      } else if (data?.package) {
+        const pkg = data.package;
+        const typedPackage: PackagePublic = {
+          id: pkg.id,
+          slug: pkg.slug,
+          name: pkg.name,
+          status: pkg.status,
+          isFeatured: pkg.isFeatured,
+          sortOrder: pkg.sortOrder,
+          originalPrice: pkg.originalPrice,
+          price: pkg.price,
+          discountPercent: pkg.discountPercent,
+          reportsWithinHours: pkg.reportsWithinHours,
+          testsCount: pkg.testsCount,
+          requisites: pkg.requisites,
+          homeCollectionMinutes: pkg.homeCollectionMinutes,
+          highlights: pkg.highlights,
+          description: pkg.description,
+          parameters: parseJsonArray<ParameterCategory>(pkg.parameters),
+          faqs: parseJsonArray<FAQ>(pkg.faqs),
+        };
+        setPackageData(typedPackage);
+      } else {
+        setNotFound(true);
+        setPackageData(null);
       }
+
+      setLoading(false);
     };
 
-    fetchPackage();
+    doFetch();
   }, [slug]);
 
   return { package_data: packageData, loading, error, notFound };

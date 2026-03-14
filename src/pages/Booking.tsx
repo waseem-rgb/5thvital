@@ -94,11 +94,22 @@ const Booking = () => {
     prevUserRef.current = user;
   }, [user, authLoading, cartItems.length, pendingCheckout]);
 
-  const handleAddToCart = useCallback((test: TestItem) => {
+  const handleAddToCart = useCallback((test: TestItem | { id: string; name: string; testCode?: string | null; category?: string | null; price: number }) => {
+    // Normalize camelCase API response to internal snake_case cart format
+    const normalized: TestItem = 'test_name' in test
+      ? test as TestItem
+      : {
+          id: test.id,
+          test_name: test.name,
+          test_code: test.testCode || '',
+          body_system: test.category || '',
+          customer_price: test.price,
+        };
+
     setCartItems(prev => {
-      const exists = prev.find(item => item.id === test.id);
+      const exists = prev.find(item => item.id === normalized.id);
       if (!exists) {
-        return [...prev, test];
+        return [...prev, normalized];
       }
       return prev;
     });

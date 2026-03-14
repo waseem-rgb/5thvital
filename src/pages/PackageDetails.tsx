@@ -166,21 +166,21 @@ const PackageDetails = () => {
     try {
       const wasAdded = addPackageToCart({
         id: package_data.id,
-        title: package_data.title,
+        name: package_data.name,
         slug: package_data.slug,
         price: package_data.price,
-        tests_included: package_data.tests_included,
+        testsCount: package_data.testsCount,
       });
-      
+
       if (wasAdded) {
         toast({
           title: "Added to Cart",
-          description: `${package_data.title} added! Continue browsing or proceed to checkout.`,
+          description: `${package_data.name} added! Continue browsing or proceed to checkout.`,
         });
       } else {
         toast({
           title: "Already in Cart",
-          description: `${package_data.title} is already in your cart.`,
+          description: `${package_data.name} is already in your cart.`,
         });
       }
     } catch (err) {
@@ -278,13 +278,13 @@ const PackageDetails = () => {
   }
 
   const hasPrice = package_data.price !== null;
-  const hasMrp = package_data.mrp !== null;
-  const hasDiscount = package_data.discount_percent !== null && package_data.discount_percent > 0;
-  const hasSnapshots = 
-    package_data.reports_within_hours !== null ||
-    package_data.tests_included !== null ||
+  const hasMrp = package_data.originalPrice !== null;
+  const hasDiscount = package_data.discountPercent !== null && package_data.discountPercent > 0;
+  const hasSnapshots =
+    package_data.reportsWithinHours !== null ||
+    package_data.testsCount !== null ||
     package_data.requisites !== null ||
-    package_data.home_collection_minutes !== null;
+    package_data.homeCollectionMinutes !== null;
   const hasHighlights = package_data.highlights !== null && package_data.highlights.trim() !== '';
   const hasDescription = package_data.description !== null && package_data.description.trim() !== '';
   const hasParameters = package_data.parameters !== null && package_data.parameters.length > 0;
@@ -320,9 +320,9 @@ const PackageDetails = () => {
             {/* Title + Featured Badge */}
             <div className="flex flex-wrap items-start gap-3 mb-4">
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-foreground">
-                {package_data.title}
+                {package_data.name}
               </h1>
-              {package_data.is_featured && (
+              {package_data.isFeatured && (
                 <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 shrink-0">
                   <Star className="h-3 w-3 mr-1 fill-current" />
                   Featured
@@ -341,7 +341,7 @@ const PackageDetails = () => {
             <div className="flex flex-wrap items-center gap-4 mb-6">
               {hasMrp && hasDiscount && (
                 <span className="text-lg text-muted-foreground line-through">
-                  {formatPrice(package_data.mrp)}
+                  {formatPrice(package_data.originalPrice)}
                 </span>
               )}
               {hasPrice && (
@@ -351,7 +351,7 @@ const PackageDetails = () => {
               )}
               {hasDiscount && (
                 <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-sm px-3 py-1">
-                  {package_data.discount_percent}% OFF
+                  {package_data.discountPercent}% OFF
                 </Badge>
               )}
             </div>
@@ -383,12 +383,12 @@ const PackageDetails = () => {
               <SnapshotCard
                 icon={Clock}
                 label="Reports Within"
-                value={package_data.reports_within_hours ? `${package_data.reports_within_hours} hours` : null}
+                value={package_data.reportsWithinHours ? `${package_data.reportsWithinHours} hours` : null}
               />
               <SnapshotCard
                 icon={TestTube}
                 label="Tests Included"
-                value={package_data.tests_included ? `${package_data.tests_included} tests` : null}
+                value={package_data.testsCount ? `${package_data.testsCount} tests` : null}
               />
               <SnapshotCard
                 icon={FileText}
@@ -398,7 +398,7 @@ const PackageDetails = () => {
               <SnapshotCard
                 icon={Home}
                 label="Home Collection"
-                value={package_data.home_collection_minutes ? `${package_data.home_collection_minutes} mins` : null}
+                value={package_data.homeCollectionMinutes ? `${package_data.homeCollectionMinutes} mins` : null}
               />
             </div>
           )}
@@ -476,26 +476,26 @@ const PackageDetails = () => {
                     </p>
                   ) : (
                     <p className="text-muted-foreground">
-                      This comprehensive health screening package includes {package_data.tests_included || 'multiple'} tests 
+                      This comprehensive health screening package includes {package_data.testsCount || 'multiple'} tests
                       to give you a complete picture of your health status.
                     </p>
                   )}
 
                   {/* Quick summary list */}
                   <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {package_data.tests_included && (
+                    {package_data.testsCount && (
                       <div className="flex items-center gap-2 text-sm">
                         <CheckCircle className="h-4 w-4 text-green-500" />
-                        <span>{package_data.tests_included} tests included</span>
+                        <span>{package_data.testsCount} tests included</span>
                       </div>
                     )}
-                    {package_data.reports_within_hours && (
+                    {package_data.reportsWithinHours && (
                       <div className="flex items-center gap-2 text-sm">
                         <CheckCircle className="h-4 w-4 text-green-500" />
-                        <span>Reports within {package_data.reports_within_hours} hours</span>
+                        <span>Reports within {package_data.reportsWithinHours} hours</span>
                       </div>
                     )}
-                    {package_data.home_collection_minutes && (
+                    {package_data.homeCollectionMinutes && (
                       <div className="flex items-center gap-2 text-sm">
                         <CheckCircle className="h-4 w-4 text-green-500" />
                         <span>Home collection available</span>

@@ -93,21 +93,21 @@ export function addToCart(item: CartItem): boolean {
  */
 export function addPackageToCart(pkg: {
   id: string;
-  title: string;
+  name: string;
   slug: string;
   price: number | null;
-  tests_included?: number | null;
+  testsCount?: number | null;
 }): boolean {
   const cartItem: CartItem = {
     id: `pkg_${pkg.id}`, // Prefix with 'pkg_' to distinguish from individual tests in UI
-    test_name: pkg.title,
+    test_name: pkg.name,
     test_code: pkg.slug.toUpperCase().replace(/-/g, '_'),
     body_system: 'Health Package',
     customer_price: pkg.price ?? 0,
     original_id: pkg.id, // Store the raw UUID for database insertion
     item_type: 'package', // Mark as package for booking_items
   };
-  
+
   return addToCart(cartItem);
 }
 

@@ -1,27 +1,23 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Search, Plus } from 'lucide-react';
 import type { CartItem } from '@/types/booking';
 
-/**
- * Medical test data from the `medical_tests_import` table.
- * This table contains the imported test catalog data with public read access.
- * Note: This component uses the same table as SearchTestsSection for consistency.
- */
-interface MedicalTestImport {
+const API_URL = import.meta.env.VITE_API_URL || 'http://64.227.129.25';
+
+interface MedicalTest {
   id: string;
-  test_name: string;
-  test_code: string | null;
+  name: string;
+  testCode: string | null;
   description: string | null;
-  body_system: string | null;
-  customer_price: number;
-  sample_type: string | null;
-  report_delivered_in: string | null;
-  synonyms: string | null;
-  profile_name: string | null;
+  category: string | null;
+  price: number;
+  sampleType: string | null;
+  turnaroundTime: string | null;
+  isActive: boolean;
+  profileName?: string | null;
 }
 
 interface TestCatalogSectionProps {
@@ -29,7 +25,7 @@ interface TestCatalogSectionProps {
 }
 
 const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
-  const [tests, setTests] = useState<MedicalTestImport[]>([]);
+  const [tests, setTests] = useState<MedicalTest[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBodySystem, setSelectedBodySystem] = useState<string>('Cardiovascular');
   const [loading, setLoading] = useState(true);
@@ -42,25 +38,14 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
   useEffect(() => {
     const fetchTests = async () => {
       try {
-        // Query medical_tests_import table (not medical_tests)
-        // No is_active filter needed as all imported tests are active
-        const { data, error } = await supabase
-          .from('medical_tests_import')
-          .select('id, test_name, test_code, description, body_system, customer_price, sample_type, report_delivered_in, synonyms, profile_name')
-          .order('body_system', { ascending: true });
+        const response = await fetch(`${API_URL}/api/tests?limit=100`);
+        const data = await response.json();
 
-        if (error) {
-          if (import.meta.env.DEV) {
-            console.error('[TestCatalog] Error fetching tests:', error);
-          }
-          throw error;
-        }
-        
         if (import.meta.env.DEV) {
-          console.log(`[TestCatalog] Loaded ${data?.length || 0} tests from medical_tests_import`);
+          console.log(`[TestCatalog] Loaded ${data.tests?.length || 0} tests from API`);
         }
-        
-        setTests(data || []);
+
+        setTests(data.tests || []);
       } catch (error) {
         console.error('Error fetching tests:', error);
       } finally {
@@ -71,47 +56,56 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
     fetchTests();
   }, []);
 
-  // Search suggestions across all tests
-  const searchSuggestions = tests.filter(test => {
-    if (!searchQuery) return false;
-    const query = searchQuery.toLowerCase();
-    return (
-      test.test_name?.toLowerCase().includes(query) ||
-      test.description?.toLowerCase().includes(query) ||
-      test.body_system?.toLowerCase().includes(query) ||
-      test.test_code?.toLowerCase().includes(query) ||
-      test.synonyms?.toLowerCase().includes(query) ||
-      test.profile_name?.toLowerCase().includes(query)
-    );
-  }).slice(0, 10); // Limit to 10 suggestions
+  // Search suggestions — use API search for better results
+  const [searchResults, setSearchResults] = useState<MedicalTest[]>([]);
+
+  useEffect(() => {
+    if (searchQuery.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/api/tests/search?q=${encodeURIComponent(searchQuery)}&limit=20`
+        );
+        const data = await response.json();
+        setSearchResults(data.tests || []);
+      } catch {
+        setSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const searchSuggestions = searchResults.slice(0, 10);
 
   const filteredTests = tests.filter(test => {
     const query = searchQuery.toLowerCase();
     const matchesSearch = !searchQuery || (
-      test.test_name?.toLowerCase().includes(query) ||
+      test.name?.toLowerCase().includes(query) ||
       test.description?.toLowerCase().includes(query) ||
-      test.body_system?.toLowerCase().includes(query) ||
-      test.synonyms?.toLowerCase().includes(query)
+      test.category?.toLowerCase().includes(query)
     );
-    
-    const matchesBodySystem = test.body_system === selectedBodySystem;
-    
+
+    const matchesBodySystem = test.category === selectedBodySystem;
+
     return matchesSearch && matchesBodySystem;
   });
 
-  const handleAddToCart = (test: MedicalTestImport) => {
+  const handleAddToCart = (test: MedicalTest) => {
     onAddToCart({
       id: test.id,
       type: 'test',
-      name: test.test_name,
-      price: test.customer_price
+      name: test.name,
+      price: test.price
     });
   };
 
-  const handleSelectTest = (test: MedicalTestImport) => {
-    setSearchQuery(test.test_name);
-    if (test.body_system) {
-      setSelectedBodySystem(test.body_system);
+  const handleSelectTest = (test: MedicalTest) => {
+    setSearchQuery(test.name);
+    if (test.category) {
+      setSelectedBodySystem(test.category);
     }
     setOpen(false);
     handleAddToCart(test);
@@ -147,7 +141,7 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
           </PopoverTrigger>
           <PopoverContent className="w-[400px] p-0" align="start">
             <Command>
-              <CommandInput 
+              <CommandInput
                 placeholder="Type to search tests..."
                 value={searchQuery}
                 onValueChange={setSearchQuery}
@@ -163,14 +157,14 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
                     >
                       <div className="flex items-center justify-between w-full">
                         <div className="flex flex-col">
-                          <span className="font-medium">{test.test_name}</span>
+                          <span className="font-medium">{test.name}</span>
                           <span className="text-xs text-muted-foreground">
-                            {test.body_system}
-                            {test.test_code && ` • ${test.test_code}`}
+                            {test.category}
+                            {test.testCode && ` • ${test.testCode}`}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-primary">₹{test.customer_price.toLocaleString()}</span>
+                          <span className="text-sm font-semibold text-primary">₹{test.price.toLocaleString()}</span>
                           <Plus className="h-4 w-4" />
                         </div>
                       </div>
@@ -204,8 +198,8 @@ const TestCatalogSection = ({ onAddToCart }: TestCatalogSectionProps) => {
         <div className="space-y-3">
           {filteredTests.map((test) => (
             <div key={test.id} className="flex items-center justify-between py-2 hover:bg-muted/50 rounded-lg px-2 cursor-pointer group" onClick={() => handleAddToCart(test)}>
-              <span className="text-sm font-light text-foreground group-hover:text-primary transition-colors font-mono">{test.test_name}</span>
-              <span className="font-semibold text-primary">₹{test.customer_price.toLocaleString()}</span>
+              <span className="text-sm font-light text-foreground group-hover:text-primary transition-colors font-mono">{test.name}</span>
+              <span className="font-semibold text-primary">₹{test.price.toLocaleString()}</span>
             </div>
           ))}
         </div>
