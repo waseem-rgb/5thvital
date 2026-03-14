@@ -11,7 +11,6 @@ import Auth from "./pages/Auth";
 import PackageDetails from "./pages/PackageDetails";
 import CMSPage from "./pages/CMSPage";
 import NotFound from "./pages/NotFound";
-import { ConfigErrorBanner } from "./components/ConfigErrorBanner";
 import PromoBanner from "./components/PromoBanner";
 import ErrorBoundary from "./components/ErrorBoundary";
 /** Redirects legacy /package/:slug to /packages/:slug */

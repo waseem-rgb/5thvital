@@ -1,6 +1,6 @@
 /**
  * 5thVital API Client
- * Replaces Supabase SDK calls with direct REST API calls to our Express backend.
+ * REST API client for our Express backend.
  */
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';

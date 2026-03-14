@@ -64,9 +64,9 @@ function isRetryableError(error: unknown): boolean {
 }
 
 /**
- * Parse Supabase error for user-friendly message.
+ * Parse API error for user-friendly message.
  */
-function parseSupabaseError(error: unknown): string {
+function parseApiError(error: unknown): string {
   if (!error) return 'Unknown error';
   
   if (typeof error === 'string') return error;
@@ -81,7 +81,7 @@ function parseSupabaseError(error: unknown): string {
     return 'Network connection issue. Please check your internet and try again.';
   }
   
-  // Supabase PostgrestError
+  // PostgrestError / API error
   if (errorMessage) {
     // Foreign key constraint
     if (errorMessage.includes('foreign key constraint')) {

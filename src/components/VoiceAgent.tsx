@@ -2,7 +2,7 @@ import { Headphones, X } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { supabase } from '@/integrations/supabase/client';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 import { RetellWebClient } from 'retell-client-js-sdk';
 
 interface VoiceAgentProps {
@@ -72,7 +72,9 @@ const VoiceAgent = ({ className }: VoiceAgentProps) => {
     processedCountRef.current = 0; // Reset processed count
 
     try {
-      const { data, error } = await supabase.functions.invoke('retell-get-token');
+      const res = await fetch(`${API_BASE}/api/retell/token`, { method: 'POST' });
+      const data = res.ok ? await res.json() : null;
+      const error = res.ok ? null : new Error(`Failed (${res.status})`);
       
       if (error || !data?.access_token) {
         console.error('Failed to get access token:', error);
