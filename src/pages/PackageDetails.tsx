@@ -287,13 +287,22 @@ const PackageDetails = () => {
     package_data.homeCollectionMinutes !== null;
   const hasHighlights = package_data.highlights !== null && package_data.highlights.trim() !== '';
   const hasDescription = package_data.description !== null && package_data.description.trim() !== '';
-  const hasParameters = package_data.parameters !== null && package_data.parameters.length > 0;
   const hasFaqs = package_data.faqs !== null && package_data.faqs.length > 0;
   const hasRequisites = package_data.requisites !== null && package_data.requisites.trim() !== '';
 
+  // Detect if parameters is old ParameterCategory[] or new selectedTests[]
+  const rawParams = package_data.parameters;
+  const isSelectedTestsFormat = rawParams !== null && rawParams.length > 0 && 'name' in rawParams[0] && !('category' in rawParams[0]);
+  const selectedTests: { id?: string; name: string; price?: number }[] = isSelectedTestsFormat
+    ? (rawParams as unknown as { id?: string; name: string; price?: number }[])
+    : [];
+  const hasSelectedTests = selectedTests.length > 0;
+
+  const hasParameters = !isSelectedTestsFormat && rawParams !== null && rawParams.length > 0;
+
   // Calculate total parameters count
-  const totalParameters = hasParameters 
-    ? package_data.parameters!.reduce((acc, cat) => acc + cat.count, 0) 
+  const totalParameters = hasParameters
+    ? package_data.parameters!.reduce((acc, cat) => acc + cat.count, 0)
     : 0;
 
   return (
@@ -413,9 +422,21 @@ const PackageDetails = () => {
                 <Info className="h-4 w-4 hidden sm:inline" />
                 About
               </TabsTrigger>
+              {hasSelectedTests && (
+                <TabsTrigger
+                  value="tests-included"
+                  className="flex-1 min-w-[100px] gap-2 data-[state=active]:bg-background"
+                >
+                  <TestTube className="h-4 w-4 hidden sm:inline" />
+                  Tests
+                  <Badge variant="secondary" className="ml-1 text-xs">
+                    {selectedTests.length}
+                  </Badge>
+                </TabsTrigger>
+              )}
               {hasParameters && (
-                <TabsTrigger 
-                  value="parameters" 
+                <TabsTrigger
+                  value="parameters"
                   className="flex-1 min-w-[100px] gap-2 data-[state=active]:bg-background"
                 >
                   <Beaker className="h-4 w-4 hidden sm:inline" />
@@ -509,6 +530,40 @@ const PackageDetails = () => {
                 </CardContent>
               </Card>
             </TabsContent>
+
+            {/* TESTS INCLUDED TAB */}
+            {hasSelectedTests && (
+              <TabsContent value="tests-included" className="mt-6">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <TestTube className="h-5 w-5 text-primary" />
+                        Tests Included
+                      </CardTitle>
+                      <Badge variant="secondary">{selectedTests.length} Tests</Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {selectedTests.map((test, index) => (
+                        <div key={test.id || index} className="flex items-center justify-between py-2 border-b border-muted last:border-0">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                            <span className="text-sm text-foreground">{test.name}</span>
+                          </div>
+                          {test.price != null && test.price > 0 && (
+                            <span className="text-sm text-muted-foreground">
+                              ₹{test.price.toLocaleString('en-IN')}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
 
             {/* PARAMETERS TAB */}
             {hasParameters && (
