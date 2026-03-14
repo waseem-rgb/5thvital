@@ -190,6 +190,7 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
 
   const [isCouponLoading, setIsCouponLoading] = useState(false);
   const [isPhoneValid, setIsPhoneValid] = useState(false);
+  const [availableOffers, setAvailableOffers] = useState<{ code: string; discountType: string; discountValue: number; description: string | null }[]>([]);
 
   const { toast } = useToast();
 
@@ -390,6 +391,15 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
       applyCoupon('WELCOME35');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch available offers
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_URL ?? '';
+    fetch(`${API_BASE}/api/coupons/active`)
+      .then(r => r.json())
+      .then(data => setAvailableOffers(data.coupons || []))
+      .catch(() => {});
   }, []);
 
   const removeCoupon = () => {
@@ -982,6 +992,30 @@ const CustomerDetailsSection = ({ cartItems, onBookingSuccess }: CustomerDetails
                     </SelectContent>
                   </Select>
                 </div>
+
+                {availableOffers.length > 0 && !couponStatus.applied && (
+                  <div className="lg:col-span-2">
+                    <Label className="text-sm font-medium text-gray-700 mb-2 block">Available Offers</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {availableOffers.map(offer => (
+                        <button
+                          key={offer.code}
+                          type="button"
+                          onClick={() => {
+                            handleInputChange('couponCode', offer.code);
+                            applyCoupon(offer.code);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-green-300 bg-green-50 text-green-800 text-xs font-medium hover:bg-green-100 transition-colors"
+                        >
+                          <span className="font-bold">{offer.code}</span>
+                          <span className="text-green-600">—</span>
+                          <span>{offer.discountType === 'percent' ? `${offer.discountValue}% off` : `₹${offer.discountValue} off`}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">Tap to apply</p>
+                  </div>
+                )}
 
                 <div>
                   <Label htmlFor="coupon" className="text-sm font-medium text-gray-700 mb-2 block">Coupon Code</Label>
